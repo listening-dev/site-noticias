@@ -30,8 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files - não commitar .env.local com credenciais reais
+.env.local
+.env*.local
+
+# netlify
+.netlify/
 
 # vercel
 .vercel

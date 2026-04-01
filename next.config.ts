@@ -1,7 +1,15 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  // Necessário para o @netlify/plugin-nextjs
+  output: 'standalone',
 
-export default nextConfig;
+  // Permitir imagens de domínios externos (portais de notícias)
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: '**' },
+    ],
+  },
+}
+
+export default nextConfig
