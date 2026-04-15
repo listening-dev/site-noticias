@@ -1,0 +1,27 @@
+name: Cron Job - Fetch Feeds & Detect Crises
+
+on:
+  schedule:
+    # Roda a cada 15 minutos
+    - cron: '*/15 * * * *'
+  # Permite executar manualmente
+  workflow_dispatch:
+
+jobs:
+  cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch feeds and process notícias
+        run: |
+          curl -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://site-noticias-listening.netlify.app/api/cron/fetch-feeds"
+
+      - name: Detect crises
+        run: |
+          curl -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://site-noticias-listening.netlify.app/api/cron/detect-crises"
+
+      - name: Log execution
+        run: echo "✅ Cron job executado em $(date)"
