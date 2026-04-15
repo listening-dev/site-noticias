@@ -70,6 +70,9 @@ export default async () => {
   }
 }
 
+// Scheduled function removida - usando GitHub Actions para cron job
+// Se precisar executar manualmente: curl -H "Authorization: Bearer CRON_SECRET" https://site-noticias-listening.netlify.app/.netlify/functions/fetch-feeds-scheduled
+
 export const config: Config = {
-  schedule: '*/15 * * * *', // A cada 15 minutos
+  // Schedule desativado - usando GitHub Actions
 }
