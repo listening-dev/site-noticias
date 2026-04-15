@@ -34,5 +34,6 @@ export default async () => {
   }
 }
 
-// Schedule configurado no netlify.toml (*/15 * * * * - a cada 15 minutos)
-export const config: Config = {}
+export const config: Config = {
+  schedule: '*/15 * * * *', // A cada 15 minutos
+}
