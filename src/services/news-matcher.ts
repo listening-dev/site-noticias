@@ -13,6 +13,7 @@ export interface MatchResult {
 export async function matchNewsForAllClients(supabase: AppSupabaseClient, sinceHours = 24): Promise<MatchResult[]> {
   const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString()
 
+  // 1. Match por filtros booleanos
   const { data: filters, error } = await supabase
     .schema('noticias')
     .from('client_filters')
@@ -24,13 +25,19 @@ export async function matchNewsForAllClients(supabase: AppSupabaseClient, sinceH
     return []
   }
 
-  const results = await Promise.allSettled(
+  const filterResults = await Promise.allSettled(
     filters.map((filter: ClientFilter) => matchFilter(supabase, filter, since))
   )
 
-  return results
+  const results = filterResults
     .filter((r): r is PromiseFulfilledResult<MatchResult> => r.status === 'fulfilled')
     .map((r) => r.value)
+
+  // 2. Match por fontes vinculadas (client_sources)
+  const sourceResults = await matchByLinkedSources(supabase, since)
+  results.push(...sourceResults)
+
+  return results
 }
 
 async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, since: string): Promise<MatchResult> {
@@ -40,12 +47,13 @@ async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, si
     return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }
   }
 
+  // Usar RPC para executar to_tsquery diretamente no PostgreSQL
   const { data: matchedNews, error } = await supabase
     .schema('noticias')
-    .from('news')
-    .select('id')
-    .gte('published_at', since)
-    .textSearch('search_vector', tsquery, { type: 'websearch' })
+    .rpc('match_news_by_tsquery', {
+      tsquery_text: tsquery,
+      since_date: since,
+    })
 
   if (error || !matchedNews) {
     console.error(`[Matcher] Erro ao buscar notícias para filtro ${filter.id}:`, error)
@@ -72,4 +80,58 @@ async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, si
   }
 
   return { client_id: filter.client_id, filter_id: filter.id, matched: matchedNews.length }
+}
+
+async function matchByLinkedSources(supabase: AppSupabaseClient, since: string): Promise<MatchResult[]> {
+  // Buscar todas as associações client_sources
+  const { data: clientSources, error } = await supabase
+    .schema('noticias')
+    .from('client_sources')
+    .select('client_id, source_id')
+
+  if (error || !clientSources || clientSources.length === 0) return []
+
+  // Agrupar source_ids por client_id
+  const clientSourceMap = new Map<string, string[]>()
+  for (const cs of clientSources) {
+    const existing = clientSourceMap.get(cs.client_id) ?? []
+    existing.push(cs.source_id)
+    clientSourceMap.set(cs.client_id, existing)
+  }
+
+  const results: MatchResult[] = []
+
+  for (const [clientId, sourceIds] of clientSourceMap) {
+    // Buscar notícias dessas fontes no período
+    const { data: news, error: newsError } = await supabase
+      .schema('noticias')
+      .from('news')
+      .select('id')
+      .in('source_id', sourceIds)
+      .gte('published_at', since)
+
+    if (newsError || !news || news.length === 0) {
+      results.push({ client_id: clientId, filter_id: 'source-linked', matched: 0 })
+      continue
+    }
+
+    const records = news.map((n: { id: string }) => ({
+      client_id: clientId,
+      news_id: n.id,
+      filter_id: null,
+    }))
+
+    const { error: insertError } = await supabase
+      .schema('noticias')
+      .from('client_news')
+      .upsert(records, { onConflict: 'client_id,news_id', ignoreDuplicates: true })
+
+    if (insertError) {
+      console.error(`[Matcher] Erro ao inserir client_news para fontes vinculadas (client ${clientId}):`, insertError)
+    }
+
+    results.push({ client_id: clientId, filter_id: 'source-linked', matched: news.length })
+  }
+
+  return results
 }

@@ -1,22 +1,29 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { NewsCard } from '@/components/news/news-card'
+import { NewsFilters } from '@/components/news/news-filters'
+import { PeriodSelector } from '@/components/report/period-selector'
 import { Badge } from '@/components/ui/badge'
 import { extractKeywords } from '@/services/boolean-search'
 import { Filter, Newspaper } from 'lucide-react'
+import { Source } from '@/lib/types/database'
 
 interface PageProps {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ page?: string }>
+  searchParams: Promise<{ page?: string; from?: string; to?: string; source?: string; category?: string }>
 }
 
 export default async function ClientePage({ params, searchParams }: PageProps) {
   const { id } = await params
-  const { page: pageParam } = await searchParams
-  const page = Number(pageParam) || 1
+  const sp = await searchParams
+  const page = Number(sp.page) || 1
   const pageSize = 30
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
+  const rangeFrom = (page - 1) * pageSize
+  const rangeTo = rangeFrom + pageSize - 1
+
+  const now = new Date()
+  const to = sp.to ? new Date(sp.to) : now
+  const from = sp.from ? new Date(sp.from) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -39,16 +46,88 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
     .eq('client_id', id)
     .eq('active', true)
 
-  // Buscar notícias matched para este cliente
-  const { data: clientNews, count } = await supabase
+  // Buscar fontes vinculadas ao cliente
+  const { data: clientSources } = await supabase
+    .schema('noticias')
+    .from('client_sources')
+    .select('source_id, sources(*)')
+    .eq('client_id', id)
+
+  const linkedSources: Source[] = (clientSources ?? []).map((cs: any) => cs.sources).filter(Boolean)
+  const linkedSourceIds = linkedSources.map((s) => s.id)
+  const hasLinkedSources = linkedSourceIds.length > 0
+
+  // Buscar categorias das fontes vinculadas para filtros
+  const linkedCategories = hasLinkedSources
+    ? [...new Set(linkedSources.map((s) => s.category).filter(Boolean))] as string[]
+    : []
+
+  // Buscar notícias: matches booleanos + notícias das fontes vinculadas
+  let newsItems: any[] = []
+  let totalCount = 0
+
+  // 1. Matches booleanos (client_news)
+  const { data: clientNews } = await supabase
     .schema('noticias')
     .from('client_news')
-    .select('*, news(*, sources(*))', { count: 'exact' })
+    .select('news_id, news(*, sources(*))')
     .eq('client_id', id)
-    .order('matched_at', { ascending: false })
-    .range(from, to)
+    .gte('matched_at', from.toISOString())
+    .lte('matched_at', to.toISOString())
 
-  const newsItems = (clientNews ?? []).map((cn: any) => cn.news).filter(Boolean)
+  const matchedNews = (clientNews ?? []).map((cn: any) => cn.news).filter(Boolean)
+
+  // 2. Notícias das fontes vinculadas
+  let sourceNews: any[] = []
+  if (hasLinkedSources) {
+    let sourceQuery = supabase
+      .schema('noticias')
+      .from('news')
+      .select('*, sources(*)')
+      .in('source_id', linkedSourceIds)
+      .gte('published_at', from.toISOString())
+      .lte('published_at', to.toISOString())
+      .order('published_at', { ascending: false })
+      .limit(3000)
+
+    if (sp.source) sourceQuery = sourceQuery.eq('source_id', sp.source)
+    if (sp.category) sourceQuery = sourceQuery.eq('category', sp.category)
+
+    const { data } = await sourceQuery
+    sourceNews = data ?? []
+  }
+
+  // 3. Mesclar e deduplicar por news.id
+  const seenIds = new Set<string>()
+  const allNews: any[] = []
+
+  // Fontes vinculadas primeiro (mais recentes no topo)
+  for (const n of sourceNews) {
+    if (!seenIds.has(n.id)) {
+      seenIds.add(n.id)
+      allNews.push(n)
+    }
+  }
+  // Depois matches booleanos
+  for (const n of matchedNews) {
+    if (!seenIds.has(n.id)) {
+      seenIds.add(n.id)
+      allNews.push(n)
+    }
+  }
+
+  // Ordenar por data de publicação
+  allNews.sort((a, b) => {
+    const da = new Date(a.published_at || 0).getTime()
+    const db = new Date(b.published_at || 0).getTime()
+    return db - da
+  })
+
+  totalCount = allNews.length
+
+  // Paginar
+  newsItems = allNews.slice(rangeFrom, rangeTo + 1)
+  const totalPages = Math.ceil(totalCount / pageSize) || 1
 
   // Extrair keywords de todos os filtros ativos (para highlight)
   const allKeywords = (filters ?? []).flatMap((f: any) => extractKeywords(f.boolean_query))
@@ -67,7 +146,16 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
   const favoritedIds = new Set((favorites ?? []).map((f: any) => f.news_id))
   const readIds = new Set((readNews ?? []).map((r: any) => r.news_id))
-  const totalPages = count ? Math.ceil(count / pageSize) : 1
+
+  function buildPageUrl(p: number) {
+    const qp = new URLSearchParams()
+    qp.set('from', from.toISOString())
+    qp.set('to', to.toISOString())
+    if (sp.source) qp.set('source', sp.source)
+    if (sp.category) qp.set('category', sp.category)
+    if (p > 1) qp.set('page', String(p))
+    return `?${qp.toString()}`
+  }
 
   return (
     <div>
@@ -78,9 +166,18 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
           <p className="text-sm text-gray-500 mt-1">{client.description}</p>
         )}
         <p className="text-sm text-gray-400 mt-1">
-          {count ?? 0} notícias encontradas
+          {totalCount} notícias encontradas
         </p>
       </div>
+
+      <div className="mb-6">
+        <PeriodSelector from={from.toISOString()} to={to.toISOString()} />
+      </div>
+
+      {/* Filtros de portal (quando há fontes vinculadas) */}
+      {hasLinkedSources && (
+        <NewsFilters sources={linkedSources} categories={linkedCategories} />
+      )}
 
       {/* Filtros booleanos ativos */}
       {filters && filters.length > 0 && (
@@ -121,13 +218,13 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
           {totalPages > 1 && (
             <div className="flex justify-center gap-2 mt-8">
               {page > 1 && (
-                <a href={`?page=${page - 1}`} className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <a href={buildPageUrl(page - 1)} className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   ← Anterior
                 </a>
               )}
               <span className="px-4 py-2 text-sm text-gray-500">Página {page} de {totalPages}</span>
               {page < totalPages && (
-                <a href={`?page=${page + 1}`} className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <a href={buildPageUrl(page + 1)} className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   Próxima →
                 </a>
               )}
@@ -139,9 +236,9 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
           <Newspaper className="h-12 w-12 mx-auto mb-4 opacity-30" />
           <p className="text-lg font-medium">Nenhuma notícia encontrada</p>
           <p className="text-sm mt-1">
-            {filters && filters.length > 0
-              ? 'Os filtros deste cliente ainda não retornaram resultados. Aguarde a próxima coleta de feeds.'
-              : 'Configure filtros booleanos para este cliente na área de administração.'}
+            {(filters && filters.length > 0) || hasLinkedSources
+              ? 'Nenhum resultado no período selecionado. Ajuste o período ou aguarde a próxima coleta.'
+              : 'Configure filtros booleanos ou vincule fontes para este cliente na área de administração.'}
           </p>
         </div>
       )}

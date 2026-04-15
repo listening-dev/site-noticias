@@ -2,44 +2,51 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { NewsCard } from '@/components/news/news-card'
 import { NewsFilters } from '@/components/news/news-filters'
+import { PeriodSelector } from '@/components/report/period-selector'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Suspense } from 'react'
 import { NewsWithSource, Source } from '@/lib/types/database'
 
 interface PageProps {
-  searchParams: Promise<{ source?: string; category?: string; page?: string }>
+  searchParams: Promise<{ source?: string; category?: string; page?: string; from?: string; to?: string }>
 }
 
 export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams
   const page = Number(params.page) || 1
   const pageSize = 30
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
+  const rangeFrom = (page - 1) * pageSize
+  const rangeTo = rangeFrom + pageSize - 1
+
+  const now = new Date()
+  const to = params.to ? new Date(params.to) : now
+  const from = params.from ? new Date(params.from) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Buscar fontes e categorias para os filtros
-  const { data: rawSources } = await supabase
+  // Buscar fontes visíveis na visão geral
+  const { data: sources } = await supabase
     .schema('noticias')
     .from('sources')
     .select('*')
     .eq('active', true)
+    .eq('visible_in_overview', true)
     .order('name')
 
-  const hiddenSources = ['Correio do Povo', 'Correio do Povo - Política', 'Correio do Povo - Economia', 'UOL Notícias', 'UOL Economia']
-  const sources = (rawSources ?? []).filter((s: Source) => !hiddenSources.includes(s.name))
+  const categories = [...new Set((sources ?? []).map((s: Source) => s.category).filter(Boolean))] as string[]
+  const visibleSourceIds = (sources ?? []).map((s: Source) => s.id)
 
-  const categories = [...new Set(sources.map((s: Source) => s.category).filter(Boolean))] as string[]
-
-  // Montar query de notícias
+  // Montar query de notícias apenas de fontes visíveis
   let query = supabase
     .schema('noticias')
     .from('news')
     .select('*, sources(*)', { count: 'exact' })
+    .in('source_id', visibleSourceIds)
+    .gte('published_at', from.toISOString())
+    .lte('published_at', to.toISOString())
     .order('published_at', { ascending: false })
-    .range(from, to)
+    .range(rangeFrom, rangeTo)
 
   if (params.source) query = query.eq('source_id', params.source)
   if (params.category) query = query.eq('category', params.category)
@@ -62,6 +69,16 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   const totalPages = count ? Math.ceil(count / pageSize) : 1
 
+  function buildPageUrl(p: number) {
+    const qp = new URLSearchParams()
+    qp.set('from', from.toISOString())
+    qp.set('to', to.toISOString())
+    if (params.source) qp.set('source', params.source)
+    if (params.category) qp.set('category', params.category)
+    if (p > 1) qp.set('page', String(p))
+    return `?${qp.toString()}`
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -69,6 +86,10 @@ export default async function HomePage({ searchParams }: PageProps) {
         <p className="text-sm text-gray-500 mt-1">
           {count ?? 0} notícias disponíveis
         </p>
+      </div>
+
+      <div className="mb-6">
+        <PeriodSelector from={from.toISOString()} to={to.toISOString()} />
       </div>
 
       <Suspense fallback={<FiltersSkeleton />}>
@@ -92,14 +113,14 @@ export default async function HomePage({ searchParams }: PageProps) {
           {totalPages > 1 && (
             <div className="flex justify-center gap-2 mt-8">
               {page > 1 && (
-                <Link href={`?page=${page - 1}${params.source ? `&source=${params.source}` : ''}${params.category ? `&category=${params.category}` : ''}`}
+                <Link href={buildPageUrl(page - 1)}
                   className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-200">
                   ← Anterior
                 </Link>
               )}
               <span className="px-4 py-2 text-sm text-gray-500">Página {page} de {totalPages}</span>
               {page < totalPages && (
-                <Link href={`?page=${page + 1}${params.source ? `&source=${params.source}` : ''}${params.category ? `&category=${params.category}` : ''}`}
+                <Link href={buildPageUrl(page + 1)}
                   className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-200">
                   Próxima →
                 </Link>

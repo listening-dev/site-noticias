@@ -6,20 +6,34 @@ export default async () => {
   const cronSecret = process.env.CRON_SECRET || ''
 
   try {
-    const response = await fetch(`${baseUrl}/api/cron/fetch-feeds`, {
+    // 1. Fetch feeds, process topics, match news
+    console.log('[Scheduled] Iniciando coleta de feeds e processamento...')
+    const feedResponse = await fetch(`${baseUrl}/api/cron/fetch-feeds`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${cronSecret}`,
       },
     })
 
-    const data = await response.json()
-    console.log('[Scheduled] Resultado:', JSON.stringify(data, null, 2))
+    const feedData = await feedResponse.json()
+    console.log('[Scheduled] Resultado fetch-feeds:', JSON.stringify(feedData, null, 2))
+
+    // 2. Detect crises (após processamento de tópicos)
+    console.log('[Scheduled] Iniciando detecção de crises...')
+    const crisisResponse = await fetch(`${baseUrl}/api/cron/detect-crises`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${cronSecret}`,
+      },
+    })
+
+    const crisisData = await crisisResponse.json()
+    console.log('[Scheduled] Resultado detect-crises:', JSON.stringify(crisisData, null, 2))
   } catch (error) {
-    console.error('[Scheduled] Erro ao chamar endpoint:', error)
+    console.error('[Scheduled] Erro ao executar pipeline de cron:', error)
   }
 }
 
 export const config: Config = {
-  schedule: '0 * * * *', // Toda hora no minuto 0
+  schedule: '*/30 * * * *', // A cada 30 minutos
 }

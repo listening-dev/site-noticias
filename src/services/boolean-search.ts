@@ -1,44 +1,56 @@
 /**
- * Converte uma query booleana simples em formato tsquery do PostgreSQL.
+ * Converte uma query booleana em formato tsquery do PostgreSQL.
  *
  * Suporta operadores: AND, OR, NOT (maiúsculas ou minúsculas)
- * Suporta aspas duplas para frases exatas.
+ * Suporta aspas duplas para frases exatas (usa <-> para proximidade).
+ *
+ * Gera output compatível com to_tsquery('portuguese', ...):
+ *   cada lexema é envolvido em aspas simples.
  *
  * Exemplos:
- *   "ministério AND transportes"        → "ministério & transportes"
- *   "governo OR presidente"             → "governo | presidente"
- *   "lula NOT bolsonaro"                → "lula & !bolsonaro"
- *   "\"reforma tributária\" AND imposto" → "'reforma tributária' & imposto"
+ *   "ministério AND transportes"             → "'ministério' & 'transportes'"
+ *   "governo OR presidente"                  → "'governo' | 'presidente'"
+ *   "\"reforma tributária\" AND imposto"      → "('reforma' <-> 'tributária') & 'imposto'"
  */
 export function booleanQueryToTsquery(query: string): string {
   if (!query.trim()) return ''
 
   let result = query.trim()
 
-  // Substituir frases entre aspas por tokens sem espaço (processados depois)
+  // 1. Extrair frases entre aspas e substituir por placeholders
   const phrases: string[] = []
   result = result.replace(/"([^"]+)"/g, (_, phrase) => {
     const idx = phrases.length
-    phrases.push(phrase.trim().replace(/\s+/g, ' & '))
+    // Cada palavra da frase entre aspas simples, unidas por <->
+    const words = phrase.trim().split(/\s+/).map((w: string) => `'${w}'`).join(' <-> ')
+    phrases.push(words)
     return `__PHRASE_${idx}__`
   })
 
-  // Substituir operadores booleanos
+  // 2. Substituir operadores booleanos
   result = result
     .replace(/\bAND\b/gi, '&')
     .replace(/\bOR\b/gi, '|')
     .replace(/\bNOT\b/gi, '& !')
 
-  // Restaurar frases
+  // 3. Restaurar frases
   phrases.forEach((phrase, idx) => {
     result = result.replace(`__PHRASE_${idx}__`, `(${phrase})`)
   })
 
-  // Limpar espaços redundantes
+  // 4. Envolver termos soltos em aspas simples
+  // Termos soltos são palavras que não estão entre aspas simples, não são operadores, e não são parênteses
+  result = result.replace(/(?<=[')\s&|!]|^)\s*([a-záàâãéèêíïóôõöúçñüA-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑÜ\w*]+)\s*(?=[&|!)\s]|$)/g, (match, word) => {
+    const trimmed = word.trim()
+    if (!trimmed) return match
+    return match.replace(trimmed, `'${trimmed}'`)
+  })
+
+  // 5. Limpar espaços redundantes
   result = result.replace(/\s+/g, ' ').trim()
 
-  // Termos soltos (sem operador entre eles) → AND implícito
-  result = result.replace(/([a-záàâãéèêíïóôõöúçñü\w]+)\s+([a-záàâãéèêíïóôõöúçñü\w(])/gi, '$1 & $2')
+  // 6. Inserir & implícito entre termos adjacentes sem operador
+  result = result.replace(/'(\s+)'/g, "' & '")
 
   return result
 }
@@ -56,14 +68,29 @@ export function isValidBooleanQuery(query: string): boolean {
 }
 
 /**
- * Extrai os termos de busca de uma query booleana (para highlight)
+ * Extrai os termos de busca de uma query booleana (para highlight).
+ * Frases entre aspas são extraídas inteiras. Termos soltos são extraídos individualmente.
  */
 export function extractKeywords(query: string): string[] {
-  return query
+  const keywords: string[] = []
+
+  // Extrair frases entre aspas (inteiras)
+  const phraseRegex = /"([^"]+)"/g
+  let match
+  while ((match = phraseRegex.exec(query)) !== null) {
+    const phrase = match[1].trim()
+    if (phrase.length > 2) keywords.push(phrase.toLowerCase())
+  }
+
+  // Extrair termos soltos (fora de aspas)
+  const withoutPhrases = query.replace(/"[^"]+"/g, ' ')
+  const terms = withoutPhrases
     .replace(/\b(AND|OR|NOT)\b/gi, ' ')
     .replace(/[&|!()]/g, ' ')
-    .replace(/"/g, '')
     .split(/\s+/)
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t.length > 2)
+
+  keywords.push(...terms)
+  return [...new Set(keywords)]
 }

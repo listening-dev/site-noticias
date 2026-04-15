@@ -29,6 +29,7 @@ export default async function FontesPage() {
               <th className="text-left px-4 py-3 font-semibold text-gray-600">Portal</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-600">Categoria</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-600">URL RSS</th>
+              <th className="text-left px-4 py-3 font-semibold text-gray-600">Visão Geral</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-600">Status</th>
             </tr>
           </thead>
@@ -49,6 +50,11 @@ export default async function FontesPage() {
                     className="text-blue-600 hover:underline text-xs truncate block max-w-xs">
                     {source.rss_url}
                   </a>
+                </td>
+                <td className="px-4 py-3">
+                  <Badge variant={source.visible_in_overview ? 'success' : 'secondary'} className="text-xs">
+                    {source.visible_in_overview ? 'Sim' : 'Não'}
+                  </Badge>
                 </td>
                 <td className="px-4 py-3">
                   <Badge variant={source.active ? 'success' : 'secondary'}>

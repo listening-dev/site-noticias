@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(curl -s http://localhost:3001/)",
+      "Bash(curl -s -H \"Authorization: Bearer NoticiasListening2026\" http://localhost:3001/api/cron/fetch-feeds)"
+    ]
+  }
+}

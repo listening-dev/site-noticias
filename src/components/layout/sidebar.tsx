@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Newspaper, Home, Search, Settings, Users, Rss, LayoutDashboard } from 'lucide-react'
+import { Newspaper, Home, Search, Settings, Users, Rss, LayoutDashboard, FileBarChart } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Client, UserProfile } from '@/lib/types/database'
 
@@ -25,7 +25,31 @@ export function Sidebar({ clients, profile }: SidebarProps) {
       <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4 gap-1">
         {/* Visão geral */}
         <NavItem href="/" icon={<Home size={18} />} label="Visão Geral" active={pathname === '/'} />
-        <NavItem href="/busca" icon={<Search size={18} />} label="Busca Global" active={pathname.startsWith('/busca')} />
+
+        {/* Analista de Mídia */}
+        {(profile?.role === 'analyst' || profile?.role === 'admin') && (
+          <>
+            <NavItem href="/analista" icon={<LayoutDashboard size={18} />} label="Dashboard Análise" active={pathname.startsWith('/analista')} />
+            <NavItem href="/busca" icon={<Search size={18} />} label="Busca Avançada" active={pathname.startsWith('/busca')} />
+          </>
+        )}
+
+        {/* Account Manager */}
+        {(profile?.role === 'account_manager' || profile?.role === 'admin') && (
+          <>
+            <NavItem href="/account-manager" icon={<LayoutDashboard size={18} />} label="Meus Clientes" active={pathname.startsWith('/account-manager')} />
+          </>
+        )}
+
+        {/* Estrategista */}
+        {(profile?.role === 'strategist' || profile?.role === 'admin') && (
+          <>
+            <NavItem href="/estrategista" icon={<LayoutDashboard size={18} />} label="Insights Globais" active={pathname.startsWith('/estrategista')} />
+          </>
+        )}
+
+        {/* Relatório (comum a todos) */}
+        <NavItem href="/relatorio" icon={<FileBarChart size={18} />} label="Relatório" active={pathname.startsWith('/relatorio')} />
 
         {/* Clientes */}
         {clients.length > 0 && (
@@ -62,7 +86,17 @@ export function Sidebar({ clients, profile }: SidebarProps) {
       {/* Rodapé com usuário */}
       <div className="border-t border-gray-200 px-4 py-3">
         <p className="text-xs text-gray-500 truncate">{profile?.email}</p>
-        <p className="text-xs font-medium text-gray-700 capitalize">{profile?.role === 'admin' ? 'Administrador' : 'Analista'}</p>
+        <p className="text-xs font-medium text-gray-700 capitalize">
+          {profile?.role === 'admin'
+            ? 'Administrador'
+            : profile?.role === 'analyst'
+              ? 'Analista de Mídia'
+              : profile?.role === 'account_manager'
+                ? 'Account Manager'
+                : profile?.role === 'strategist'
+                  ? 'Estrategista'
+                  : 'Usuário'}
+        </p>
       </div>
     </aside>
   )
