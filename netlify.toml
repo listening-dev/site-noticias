@@ -9,9 +9,9 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Configuração de Scheduled Function
+# Configuração de Scheduled Function - fetch-feeds roda a cada 15 minutos
 [[functions]]
-  path = "netlify/functions/fetch-feeds-scheduled.ts"
+  path = "netlify/functions/fetch-feeds-scheduled"
   schedule = "*/15 * * * *"
 
 # Variáveis de ambiente necessárias (configurar no painel do Netlify)
