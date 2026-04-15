@@ -9,8 +9,14 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Configuração de Scheduled Function
+[[functions]]
+  path = "netlify/functions/fetch-feeds-scheduled.ts"
+  schedule = "*/15 * * * *"
+
 # Variáveis de ambiente necessárias (configurar no painel do Netlify)
 # NEXT_PUBLIC_SUPABASE_URL
 # NEXT_PUBLIC_SUPABASE_ANON_KEY
 # SUPABASE_SERVICE_ROLE_KEY
 # CRON_SECRET
+# OPENAI_API_KEY
