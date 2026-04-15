@@ -1,8 +1,13 @@
 import { OpenAI } from 'openai'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Lazy initialization - OpenAI client é criado apenas quando necessário
+function getOpenAIClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY environment variable is not set')
+  }
+  return new OpenAI({ apiKey })
+}
 
 export interface ExtractedTopics {
   topics: Array<{
@@ -49,6 +54,7 @@ Responda em JSON (sem markdown) com exatamente esta estrutura:
 }`
 
   try {
+    const openai = getOpenAIClient()
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -139,6 +145,7 @@ Responda em JSON (sem markdown) com exatamente esta estrutura:
 }`
 
   try {
+    const openai = getOpenAIClient()
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
