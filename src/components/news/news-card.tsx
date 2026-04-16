@@ -56,9 +56,21 @@ export function NewsCard({ news, isFavorited = false, isRead = false, keywords =
     }
   }
 
+  function accentInsensitive(keyword: string): string {
+    return keyword
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/[aáàâãäAÁÀÂÃÄ]/g, '[aáàâãäAÁÀÂÃÄ]')
+      .replace(/[eéèêëEÉÈÊË]/g, '[eéèêëEÉÈÊË]')
+      .replace(/[iíìîïIÍÌÎÏ]/g, '[iíìîïIÍÌÎÏ]')
+      .replace(/[oóòôõöOÓÒÔÕÖ]/g, '[oóòôõöOÓÒÔÕÖ]')
+      .replace(/[uúùûüUÚÙÛÜ]/g, '[uúùûüUÚÙÛÜ]')
+      .replace(/[cçCÇ]/g, '[cçCÇ]')
+      .replace(/[nñNÑ]/g, '[nñNÑ]')
+  }
+
   function highlightKeywords(text: string): string {
     if (!keywords.length) return text
-    const pattern = new RegExp(`(${keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
+    const pattern = new RegExp(`(${keywords.map(accentInsensitive).join('|')})`, 'gi')
     return text.replace(pattern, '<mark class="keyword-highlight">$1</mark>')
   }
 
