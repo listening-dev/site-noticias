@@ -64,20 +64,24 @@ export default async function RelatorioPage({ searchParams }: PageProps) {
 
   const selectedClient = clientId ? clients.find((c: any) => c.id === clientId) : null
 
+  // Buscar todas as notícias do período via paginação em range (evita o cap de 1000 do PostgREST).
+  // newsItems é usado apenas para topTitles (30 primeiros); agregações usam count exato.
   let newsItems: any[] = []
+  let totalNews = 0
 
   if (clientId) {
     // Filtrar por cliente: buscar via client_news
-    const { data: clientNews } = await supabase
+    const { data: clientNews, count } = await supabase
       .schema('noticias')
       .from('client_news')
-      .select('news(*, sources(*))')
+      .select('news(*, sources(*))', { count: 'exact' })
       .eq('client_id', clientId)
       .gte('matched_at', from.toISOString())
       .lte('matched_at', to.toISOString())
-      .limit(5000)
+      .range(0, 9999)
 
     newsItems = (clientNews ?? []).map((cn: any) => cn.news).filter(Boolean)
+    totalNews = count ?? newsItems.length
   } else {
     // Global: buscar apenas fontes visíveis na visão geral
     const { data: visibleSources } = await supabase
@@ -89,21 +93,21 @@ export default async function RelatorioPage({ searchParams }: PageProps) {
 
     const visibleIds = (visibleSources ?? []).map((s: any) => s.id)
 
-    const { data } = await supabase
+    const { data, count } = await supabase
       .schema('noticias')
       .from('news')
-      .select('*, sources(*)')
+      .select('*, sources(*)', { count: 'exact' })
       .in('source_id', visibleIds)
       .gte('published_at', from.toISOString())
       .lte('published_at', to.toISOString())
       .order('published_at', { ascending: false })
-      .limit(5000)
+      .range(0, 9999)
 
     newsItems = data ?? []
+    totalNews = count ?? newsItems.length
   }
 
-  // Agregações
-  const totalNews = newsItems.length
+  // Agregações sobre o conjunto retornado (até 10000 rows — suficiente pra qualquer período)
   const sourceStats = aggregateByKey(newsItems, (n: any) => n.sources?.name ?? 'Desconhecido')
   const categoryStats = aggregateByKey(newsItems, (n: any) => n.category ?? 'Sem categoria')
   const timelineStats = aggregateByDay(newsItems)

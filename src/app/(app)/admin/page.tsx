@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Newspaper, Users, Rss, TrendingUp } from 'lucide-react'
+import { BackfillTopicsWidget } from '@/components/admin/backfill-topics-widget'
 
 export default async function AdminPage() {
   const supabase = await createClient()
@@ -14,11 +15,13 @@ export default async function AdminPage() {
     { count: clientCount },
     { count: sourceCount },
     { count: userCount },
+    { count: topicsCount },
   ] = await Promise.all([
     supabase.schema('noticias').from('news').select('*', { count: 'exact', head: true }),
     supabase.schema('noticias').from('clients').select('*', { count: 'exact', head: true }),
     supabase.schema('noticias').from('sources').select('*', { count: 'exact', head: true }).eq('active', true),
     supabase.schema('noticias').from('user_profiles').select('*', { count: 'exact', head: true }),
+    supabase.schema('noticias').from('news_topics').select('*', { count: 'exact', head: true }),
   ])
 
   // Top clientes por volume de notícias
@@ -75,6 +78,13 @@ export default async function AdminPage() {
           </CardContent>
         </Card>
       )}
+
+      <div className="mt-4">
+        <BackfillTopicsWidget
+          initialTotal={newsCount ?? 0}
+          initialProcessed={topicsCount ?? 0}
+        />
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
         <a href="/admin/fontes" className="rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-300 hover:shadow-sm transition-all">

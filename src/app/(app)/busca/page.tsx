@@ -27,12 +27,15 @@ export default async function BuscaPage({ searchParams }: PageProps) {
   let count = 0
 
   if (q && q.trim()) {
-    // Full-text search em português com filtro de período
+    // search_vector está unaccented (migration 011). Pra casar, a query
+    // precisa ser unaccented também — senão "Conceição" nunca acha.
+    const unaccentedQuery = q.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
     const { data, count: total } = await supabase
       .schema('noticias')
       .from('news')
       .select('*, sources(*)', { count: 'exact' })
-      .textSearch('search_vector', q.trim(), { type: 'websearch' })
+      .textSearch('search_vector', unaccentedQuery, { type: 'websearch', config: 'portuguese' })
       .gte('published_at', from.toISOString())
       .lte('published_at', to.toISOString())
       .order('published_at', { ascending: false })

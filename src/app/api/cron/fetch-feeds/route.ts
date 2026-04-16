@@ -30,30 +30,38 @@ export async function GET(request: NextRequest) {
     // AFTER: await both in parallel
     console.log('[Cron] Iniciando matching + extração de tópicos em paralelo...')
 
-    // Pre-fetch recent news for topic extraction (don't wait for this to finish before starting matching)
-    const recentNewsPromise = supabase
-      .schema('noticias')
-      .from('news')
-      .select('id, title, description')
-      .gte('created_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(50)
+    // Pick 50 most recent news that are NOT yet in news_topics.
+    // Isso garante catch-up automático se um ciclo anterior tiver falhado,
+    // e evita chamadas OpenAI redundantes sobre notícias já processadas.
+    const pendingTopicsPromise = (async () => {
+      const { data: processed } = await supabase
+        .schema('noticias')
+        .from('news_topics')
+        .select('news_id')
+      const processedIds = new Set((processed ?? []).map((r: any) => r.news_id))
 
-    // Execute matching + fetch recent news in parallel
-    const [matchResults, recentNews] = await Promise.all([
+      const { data: candidates } = await supabase
+        .schema('noticias')
+        .from('news')
+        .select('id, title, description')
+        .order('created_at', { ascending: false })
+        .limit(50 + processedIds.size)
+
+      return (candidates ?? []).filter((n: any) => !processedIds.has(n.id)).slice(0, 50)
+    })()
+
+    // Execute matching + fetch pending news in parallel
+    const [matchResults, pendingNews] = await Promise.all([
       matchNewsForAllClients(supabase),
-      recentNewsPromise,
+      pendingTopicsPromise,
     ])
 
     const totalMatched = matchResults.reduce((sum, r) => sum + r.matched, 0)
     console.log(`[Cron] Matching concluído. Total matched: ${totalMatched}`)
 
-    // Now extract topics from fetched recent news
-    console.log('[Cron] Processando extração de tópicos com OpenAI...')
+    console.log(`[Cron] Extraindo tópicos OpenAI em ${pendingNews.length} notícias não processadas...`)
     const topicResults =
-      recentNews.data && recentNews.data.length > 0
-        ? await processNewsTopicsBatch(supabase, recentNews.data)
-        : []
+      pendingNews.length > 0 ? await processNewsTopicsBatch(supabase, pendingNews as any) : []
 
     const successfulTopicProcessing = topicResults.filter((r) => r.success).length
     console.log(

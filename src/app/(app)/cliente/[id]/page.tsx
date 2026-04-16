@@ -3,9 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { NewsCard } from '@/components/news/news-card'
 import { NewsFilters } from '@/components/news/news-filters'
 import { PeriodSelector } from '@/components/report/period-selector'
-import { Badge } from '@/components/ui/badge'
 import { extractKeywords } from '@/services/boolean-search'
-import { AlertTriangle, Filter, Newspaper } from 'lucide-react'
+import { AlertTriangle, Newspaper } from 'lucide-react'
 import { Source } from '@/lib/types/database'
 
 interface PageProps {
@@ -148,25 +147,6 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
       {hasLinkedSources && (
         <NewsFilters sources={linkedSources} categories={linkedCategories} />
-      )}
-
-      {hasActiveFilters && (
-        <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Filter size={14} className="text-blue-600" />
-            <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Filtros de busca ativos</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {filters!.map((filter: any) => (
-              <div key={filter.id} className="flex flex-col gap-0.5">
-                {filter.label && <span className="text-xs text-blue-600 font-medium">{filter.label}</span>}
-                <Badge variant="outline" className="text-xs font-mono border-blue-200 text-blue-800 bg-white">
-                  {filter.boolean_query}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {newsItems.length > 0 ? (

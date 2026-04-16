@@ -193,44 +193,52 @@ export function TemporalCharts({ dailyStats = [], sentimentTrend = [], loading =
       </Card>
 
       {/* Estatísticas Resumidas */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatBox
-          label="Total de Notícias"
-          value={formattedDailyStats.reduce((sum, d) => sum + d.total_news, 0)}
-          color="bg-blue-50 text-blue-700"
-        />
-        <StatBox
-          label="Média por Dia"
-          value={
-            formattedDailyStats.length > 0
-              ? Math.round(
-                  formattedDailyStats.reduce((sum, d) => sum + d.total_news, 0) /
-                    formattedDailyStats.length
-                )
-              : 0
-          }
-          color="bg-purple-50 text-purple-700"
-        />
-        <StatBox
-          label="Sentimento Positivo"
-          value={formattedDailyStats.reduce((sum, d) => sum + d.positive_sentiment, 0)}
-          color="bg-green-50 text-green-700"
-        />
-        <StatBox
-          label="Sentimento Negativo"
-          value={formattedDailyStats.reduce((sum, d) => sum + d.negative_sentiment, 0)}
-          color="bg-red-50 text-red-700"
-        />
-      </div>
+      {(() => {
+        const totalNews = formattedDailyStats.reduce((sum, d) => sum + d.total_news, 0)
+        const pos = formattedDailyStats.reduce((sum, d) => sum + d.positive_sentiment, 0)
+        const neu = formattedDailyStats.reduce((sum, d) => sum + (d.neutral_sentiment ?? 0), 0)
+        const neg = formattedDailyStats.reduce((sum, d) => sum + d.negative_sentiment, 0)
+        const analisadas = pos + neu + neg
+        const mediaDia = formattedDailyStats.length > 0
+          ? Math.round(totalNews / formattedDailyStats.length)
+          : 0
+        const coberturaPct = totalNews > 0 ? Math.round((analisadas / totalNews) * 100) : 0
+
+        return (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <StatBox label="Total de Notícias" value={totalNews} color="bg-blue-50 text-blue-700" />
+              <StatBox label="Média por Dia" value={mediaDia} color="bg-purple-50 text-purple-700" />
+              <StatBox
+                label="Positivo"
+                value={pos}
+                subtitle={analisadas > 0 ? `de ${analisadas} analisadas` : 'sem análise ainda'}
+                color="bg-green-50 text-green-700"
+              />
+              <StatBox
+                label="Negativo"
+                value={neg}
+                subtitle={analisadas > 0 ? `de ${analisadas} analisadas` : 'sem análise ainda'}
+                color="bg-red-50 text-red-700"
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Cobertura de análise de sentimento: <span className="font-semibold">{analisadas}/{totalNews} notícias ({coberturaPct}%)</span>.
+              {coberturaPct < 80 && ' A análise é aplicada gradualmente pelo pipeline de NLP — notícias antigas sem análise não entram nos totais de sentimento.'}
+            </p>
+          </>
+        )
+      })()}
     </div>
   )
 }
 
-function StatBox({ label, value, color }: { label: string; value: number; color: string }) {
+function StatBox({ label, value, subtitle, color }: { label: string; value: number; subtitle?: string; color: string }) {
   return (
     <div className={`rounded-lg p-4 ${color}`}>
       <p className="text-sm font-medium opacity-75">{label}</p>
       <p className="text-3xl font-bold mt-1">{value}</p>
+      {subtitle && <p className="text-xs opacity-60 mt-1">{subtitle}</p>}
     </div>
   )
 }

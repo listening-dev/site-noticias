@@ -253,19 +253,18 @@ export async function getTrendingTopics(
   try {
     const sinceDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
-    // Group by topic_name and aggregate
-    const { data: raw, error } = await supabase
-      .schema('noticias')
-      .from('topic_mentions')
-      .select('topic_name, sentiment')
-      .gte('mentioned_at', sinceDate)
+    const { paginateRows } = await import('@/lib/supabase/paginate')
+    const raw = await paginateRows<{ topic_name: string; sentiment: string | null }>(
+      () =>
+        supabase
+          .schema('noticias')
+          .from('topic_mentions')
+          .select('topic_name, sentiment')
+          .gte('mentioned_at', sinceDate),
+      { context: 'TrendingTopics' },
+    )
 
-    if (error) {
-      console.error('[TrendingTopics] Error:', error)
-      return []
-    }
-
-    if (!raw || raw.length === 0) {
+    if (raw.length === 0) {
       return []
     }
 
