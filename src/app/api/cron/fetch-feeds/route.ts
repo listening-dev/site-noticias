@@ -24,15 +24,14 @@ export async function GET(request: NextRequest) {
     const totalInserted = feedResults.reduce((sum, r) => sum + r.inserted, 0)
     console.log(`[Cron] Feeds coletados. Total inserido: ${totalInserted}`)
 
-    console.log('[Cron] Iniciando matching de notícias com clientes...')
-    const matchResults = await matchNewsForAllClients(supabase)
+    // [Optimization #3] Parallelize matching + topic extraction
+    // These are independent operations that can run in parallel
+    // BEFORE: await matchResults then await topicResults (sequential)
+    // AFTER: await both in parallel
+    console.log('[Cron] Iniciando matching + extração de tópicos em paralelo...')
 
-    const totalMatched = matchResults.reduce((sum, r) => sum + r.matched, 0)
-    console.log(`[Cron] Matching concluído. Total matched: ${totalMatched}`)
-
-    // Processar tópicos das notícias inseridas recentemente
-    console.log('[Cron] Iniciando extração de tópicos com OpenAI...')
-    const recentNews = await supabase
+    // Pre-fetch recent news for topic extraction (don't wait for this to finish before starting matching)
+    const recentNewsPromise = supabase
       .schema('noticias')
       .from('news')
       .select('id, title, description')
@@ -40,9 +39,20 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(50)
 
+    // Execute matching + fetch recent news in parallel
+    const [matchResults, recentNews] = await Promise.all([
+      matchNewsForAllClients(supabase),
+      recentNewsPromise,
+    ])
+
+    const totalMatched = matchResults.reduce((sum, r) => sum + r.matched, 0)
+    console.log(`[Cron] Matching concluído. Total matched: ${totalMatched}`)
+
+    // Now extract topics from fetched recent news
+    console.log('[Cron] Processando extração de tópicos com OpenAI...')
     const topicResults =
       recentNews.data && recentNews.data.length > 0
-        ? await processNewsTopicsBatch(supabase, recentNews.data, 3)
+        ? await processNewsTopicsBatch(supabase, recentNews.data)
         : []
 
     const successfulTopicProcessing = topicResults.filter((r) => r.success).length

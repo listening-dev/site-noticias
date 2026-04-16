@@ -85,9 +85,63 @@ function TabButton({
 function SearchTab() {
   const [filters, setFilters] = useState<SearchFiltersState | null>(null)
   const [results, setResults] = useState<SearchResult[]>([])
+  const [filteredCount, setFilteredCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [userClients, setUserClients] = useState<Array<{ id: string; name: string }>>([])
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([])
   const supabase = createClient()
+
+  // Load user's clients
+  useEffect(() => {
+    const loadClients = async () => {
+      try {
+        const { data: userData } = await supabase.auth.getUser()
+        if (!userData.user) return
+
+        // Check if user is admin
+        const { data: profile } = await supabase
+          .schema('noticias')
+          .from('user_profiles')
+          .select('role')
+          .eq('id', userData.user.id)
+          .single()
+
+        if (profile?.role === 'admin') {
+          // Admin sees all clients
+          const { data: allClients } = await supabase
+            .schema('noticias')
+            .from('clients')
+            .select('id, name')
+            .order('name')
+          setUserClients(allClients ?? [])
+        } else {
+          // Non-admin sees only their assigned clients
+          const { data: userClientLinks } = await supabase
+            .schema('noticias')
+            .from('user_clients')
+            .select('client_id, clients(id, name)')
+            .eq('user_id', userData.user.id)
+
+          const clientsList = (userClientLinks ?? [])
+            .map((uc: any) => uc.clients)
+            .filter(Boolean)
+            .sort((a: any, b: any) => a.name.localeCompare(b.name))
+
+          setUserClients(clientsList)
+
+          // Auto-select first client if there's only one
+          if (clientsList.length === 1 && clientsList[0]?.id) {
+            setSelectedClientIds([clientsList[0].id])
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao carregar clientes:', error)
+      }
+    }
+
+    loadClients()
+  }, [])
 
   useEffect(() => {
     if (!filters) return
@@ -103,7 +157,7 @@ function SearchTab() {
           return
         }
 
-        const { data, error: searchError } = await advancedSearch(
+        const { data, filteredCount: count, error: searchError } = await advancedSearch(
           supabase,
           {
             query: filters.query || undefined,
@@ -113,6 +167,7 @@ function SearchTab() {
             categories: filters.categories.length > 0 ? filters.categories : undefined,
             topicNames: filters.topics.length > 0 ? filters.topics : undefined,
             sortBy: filters.sortBy,
+            clientIds: selectedClientIds.length > 0 ? selectedClientIds : undefined,
             pageSize: 20,
           },
           userData.user.id
@@ -121,10 +176,12 @@ function SearchTab() {
         if (searchError) {
           setError(searchError)
           setResults([])
+          setFilteredCount(0)
           return
         }
 
         setResults(data)
+        setFilteredCount(count)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Erro ao buscar')
         setResults([])
@@ -134,10 +191,43 @@ function SearchTab() {
     }
 
     performSearch()
-  }, [filters])
+  }, [filters, selectedClientIds])
 
   return (
     <div className="space-y-6">
+      {/* Client Selector */}
+      {userClients.length > 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                Clientes
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {userClients.map((client) => (
+                  <Button
+                    key={client.id}
+                    variant={selectedClientIds.includes(client.id) ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setSelectedClientIds((prev) =>
+                        prev.includes(client.id)
+                          ? prev.filter((id) => id !== client.id)
+                          : [...prev, client.id]
+                      )
+                    }}
+                    disabled={loading}
+                  >
+                    {client.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filtros */}
       <SearchFilters onFilterChange={setFilters} isLoading={loading} />
 
@@ -146,7 +236,7 @@ function SearchTab() {
         <CardHeader className="flex flex-row items-start justify-between">
           <div>
             <CardTitle className="text-lg">
-              Resultados {results.length > 0 && `(${results.length})`}
+              Resultados {filteredCount > 0 && `(${filteredCount})`}
             </CardTitle>
             <CardDescription>
               {!filters ? 'Configure os filtros para buscar' : 'Notícias encontradas com os critérios selecionados'}
@@ -279,11 +369,17 @@ function SearchResultCard({ news }: { news: SearchResult }) {
   )
 }
 
+function toLocalDatetimeForInput(date: Date): string {
+  const offset = date.getTimezoneOffset()
+  const local = new Date(date.getTime() - offset * 60000)
+  return local.toISOString().slice(0, 16)
+}
+
 function AnalysisTab() {
   const [dateFrom, setDateFrom] = useState(
-    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    toLocalDatetimeForInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
   )
-  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [dateTo, setDateTo] = useState(toLocalDatetimeForInput(new Date()))
   const [loading, setLoading] = useState(false)
   const [dailyStats, setDailyStats] = useState<any[]>([])
   const [sentimentTrend, setSentimentTrend] = useState<any[]>([])
@@ -293,9 +389,13 @@ function AnalysisTab() {
     const loadData = async () => {
       try {
         setLoading(true)
+        // Converter datetime-local para ISO 8601
+        const fromISO = new Date(`${dateFrom}:00`).toISOString()
+        const toISO = new Date(`${dateTo}:00`).toISOString()
+
         const [dailyData, sentimentData] = await Promise.all([
-          getTemporalDistribution(supabase, dateFrom, dateTo),
-          getSentimentTrend(supabase, dateFrom, dateTo),
+          getTemporalDistribution(supabase, fromISO, toISO),
+          getSentimentTrend(supabase, fromISO, toISO),
         ])
         setDailyStats(dailyData)
         setSentimentTrend(sentimentData)
@@ -316,9 +416,9 @@ function AnalysisTab() {
         <CardContent className="pt-6">
           <div className="flex gap-4 items-end">
             <div className="flex-1">
-              <label className="text-sm font-medium text-gray-700 block mb-2">Data Inicial</label>
+              <label className="text-sm font-medium text-gray-700 block mb-2">Data Inicial (com horário)</label>
               <input
-                type="date"
+                type="datetime-local"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
@@ -326,9 +426,9 @@ function AnalysisTab() {
               />
             </div>
             <div className="flex-1">
-              <label className="text-sm font-medium text-gray-700 block mb-2">Data Final</label>
+              <label className="text-sm font-medium text-gray-700 block mb-2">Data Final (com horário)</label>
               <input
-                type="date"
+                type="datetime-local"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
@@ -336,6 +436,7 @@ function AnalysisTab() {
               />
             </div>
           </div>
+          <p className="text-xs text-gray-500 mt-2">Horário local será usado na análise temporal</p>
         </CardContent>
       </Card>
 

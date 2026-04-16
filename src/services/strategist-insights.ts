@@ -40,6 +40,7 @@ export async function getTopGlobalThemes(
 ): Promise<GlobalThemeStats[]> {
   try {
     const sinceDate = new Date(Date.now() - daysBadck * 24 * 60 * 60 * 1000).toISOString()
+    const toDate = new Date().toISOString()
 
     // 1. Buscar temas globais ativos
     const { data: themes } = await supabase
@@ -56,30 +57,26 @@ export async function getTopGlobalThemes(
 
     const results: GlobalThemeStats[] = []
 
-    // 2. Para cada tema, contar menções e sentimento
+    // Import da função otimizada com denormalização
+    const { getTopicStats } = await import('./topic-search')
+
+    // 2. Para cada tema, contar menções e sentimento usando tabela denormalizada
     for (const theme of themes) {
-      // Buscar news_topics que menciona este tema (por nome)
-      const { data: newsTopics } = await supabase
-        .schema('noticias')
-        .from('news_topics')
-        .select('sentiment')
-        .gte('extracted_at', sinceDate)
-        .filter('topics', 'ilike', `%"name":"${theme.name}"%`)
+      // Usar stats agregados da tabela denormalizada (O(log n) com índices)
+      const stats = await getTopicStats(supabase, theme.name, sinceDate, toDate)
 
-      if (!newsTopics || newsTopics.length === 0) continue
-
-      const sentiments = {
-        positive: newsTopics.filter((nt) => nt.sentiment === 'positive').length,
-        neutral: newsTopics.filter((nt) => nt.sentiment === 'neutral').length,
-        negative: newsTopics.filter((nt) => nt.sentiment === 'negative').length,
-      }
+      if (!stats || stats.mention_count === 0) continue
 
       results.push({
         theme_id: theme.id,
         theme_name: theme.name,
-        mention_count: newsTopics.length,
-        sentiment_distribution: sentiments,
-        trending: newsTopics.length > 10, // Simplificado
+        mention_count: stats.mention_count,
+        sentiment_distribution: {
+          positive: stats.positive,
+          neutral: stats.neutral,
+          negative: stats.negative,
+        },
+        trending: stats.mention_count > 10, // Simplificado
         recent_spike: false, // TODO: Implementar detecção de spike
       })
     }

@@ -1,5 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { booleanQueryToTsquery } from './boolean-search'
+import { matchNewsByTsquery } from './jsonb-search'
+import { processBatchWithSemaphore } from '@/lib/concurrency-semaphore'
 import { Database, ClientFilter } from '@/lib/types/database'
 
 type AppSupabaseClient = SupabaseClient<Database>
@@ -25,13 +27,29 @@ export async function matchNewsForAllClients(supabase: AppSupabaseClient, sinceH
     return []
   }
 
-  const filterResults = await Promise.allSettled(
-    filters.map((filter: ClientFilter) => matchFilter(supabase, filter, since))
-  )
+  // [Optimization #1] Use semaphore to control RPC concurrency (max 10 concurrent)
+  // Prevents connection pool saturation with unbounded Promise.allSettled
+  const results: MatchResult[] = []
+  const maxConcurrency = Math.min(10, Math.max(5, filters.length / 10))
 
-  const results = filterResults
-    .filter((r): r is PromiseFulfilledResult<MatchResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  try {
+    const filterResults = await processBatchWithSemaphore(
+      filters,
+      (filter: ClientFilter) => matchFilter(supabase, filter, since),
+      maxConcurrency,
+      {
+        onProgress: (completed, total) => {
+          if (completed % 10 === 0) {
+            console.log(`[Matcher] Processed ${completed}/${total} filters with concurrency=${maxConcurrency}`)
+          }
+        },
+      }
+    )
+
+    results.push(...filterResults.filter((r): r is MatchResult => r !== null))
+  } catch (error) {
+    console.error('[Matcher] Error processing filters with semaphore:', error)
+  }
 
   // 2. Match por fontes vinculadas (client_sources)
   const sourceResults = await matchByLinkedSources(supabase, since)
@@ -47,18 +65,8 @@ async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, si
     return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }
   }
 
-  // Usar RPC para executar to_tsquery diretamente no PostgreSQL
-  const { data: matchedNews, error } = await supabase
-    .schema('noticias')
-    .rpc('match_news_by_tsquery', {
-      tsquery_text: tsquery,
-      since_date: since,
-    })
-
-  if (error || !matchedNews) {
-    console.error(`[Matcher] Erro ao buscar notícias para filtro ${filter.id}:`, error)
-    return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }
-  }
+  // Usar função consolidada que valida tsquery antes de RPC
+  const matchedNews = await matchNewsByTsquery(supabase, tsquery, since)
 
   if (matchedNews.length === 0) {
     return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }

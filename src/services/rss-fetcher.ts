@@ -1,10 +1,13 @@
 import Parser from 'rss-parser'
 import { Source } from '@/lib/types/database'
+import { getCategoryResolver } from './category-resolver'
 
 const parser = new Parser({
   timeout: 10000,
   headers: { 'User-Agent': 'Central-Noticias-Bot/1.0' },
 })
+
+const categoryResolver = getCategoryResolver()
 
 export interface ParsedNewsItem {
   title: string
@@ -42,18 +45,21 @@ export function createRssIngestionPipeline(deps?: { fetch?: FetchFn }) {
     try {
       const feed = await parser.parseString(xmlContent)
       items = feed.items
-        .map((item) => ({
-          title: stripHtml(item.title || '').trim(),
-          description: item.contentSnippet
-            ? stripHtml(item.contentSnippet).trim().slice(0, 1000)
-            : item.summary
-            ? stripHtml(item.summary).trim().slice(0, 1000)
-            : null,
-          url: item.link || item.guid || '',
-          source_id: source.id,
-          category: resolveCategory(item.categories, source.category),
-          published_at: item.pubDate ? new Date(item.pubDate).toISOString() : null,
-        }))
+        .map((item) => {
+          const { category } = categoryResolver.resolve(item.categories, source.category)
+          return {
+            title: stripHtml(item.title || '').trim(),
+            description: item.contentSnippet
+              ? stripHtml(item.contentSnippet).trim().slice(0, 1000)
+              : item.summary
+              ? stripHtml(item.summary).trim().slice(0, 1000)
+              : null,
+            url: item.link || item.guid || '',
+            source_id: source.id,
+            category,
+            published_at: item.pubDate ? new Date(item.pubDate).toISOString() : null,
+          }
+        })
         .filter((item) => item.url && item.title)
     } catch (error) {
       return {
@@ -117,49 +123,6 @@ async function fetchWithEncodingDetection(url: string, fetchFn: FetchFn): Promis
   return new TextDecoder('utf-8').decode(uint8Array)
 }
 
-// Mapeamento de categorias RSS → categorias do sistema
-const CATEGORY_MAP: Record<string, string> = {
-  economia: 'economia',
-  economy: 'economia',
-  business: 'economia',
-  mercado: 'economia',
-  financeiro: 'economia',
-  finanças: 'economia',
-  investimento: 'economia',
-  'política': 'política',
-  politics: 'política',
-  governo: 'política',
-  poder: 'política',
-  eleições: 'política',
-  congresso: 'política',
-  legislativo: 'política',
-  executivo: 'política',
-  'saúde': 'saúde',
-  health: 'saúde',
-  medicina: 'saúde',
-  regional: 'regional',
-}
-
-/**
- * Resolve a categoria da notícia: prioriza a categoria do próprio item RSS,
- * com fallback para a categoria da fonte. Remove "tecnologia".
- */
-function resolveCategory(itemCategories: string[] | undefined, sourceCategory: string | null): string | null {
-  if (itemCategories && itemCategories.length > 0) {
-    for (const cat of itemCategories) {
-      const lower = cat.toLowerCase().trim()
-      // Match exato
-      if (CATEGORY_MAP[lower]) return CATEGORY_MAP[lower]
-      // Match parcial (ex: "Economia & Negócios" → "economia")
-      for (const [key, value] of Object.entries(CATEGORY_MAP)) {
-        if (lower.includes(key)) return value
-      }
-    }
-  }
-
-  if (!sourceCategory || sourceCategory === 'tecnologia') return 'geral'
-  return sourceCategory
-}
 
 function stripHtml(html: string): string {
   return html

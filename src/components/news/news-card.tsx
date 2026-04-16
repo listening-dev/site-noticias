@@ -5,8 +5,9 @@ import { ExternalLink, Star, CheckCheck, Clock, Loader2 } from 'lucide-react'
 import { News, Source } from '@/lib/types/database'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatRelativeTime, truncate } from '@/lib/utils'
+import { truncate } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { RelativeTime } from '@/components/relative-time'
 
 interface NewsCardProps {
   news: News & { sources?: Source }
@@ -101,7 +102,7 @@ export function NewsCard({ news, isFavorited = false, isRead = false, keywords =
           {/* Data */}
           <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
             <Clock size={12} />
-            <span>{formatRelativeTime(news.published_at)}</span>
+            <RelativeTime date={news.published_at} />
           </div>
         </div>
 

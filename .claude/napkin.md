@@ -32,4 +32,18 @@
 1. **[2026-04-15] Views que retornam dados de usuários devem ser funções SECURITY DEFINER com RLS**
    Do instead: Nunca use GRANT SELECT TO authenticated em views com dados sensíveis. Use funções que filtram por auth.uid().
 
+## JSONB & tsquery Fixes — IMPLEMENTED (2026-04-15)
+1. **[2026-04-15] Bug #1 FIXED: JSONB full-scan replaced with denormalized topic_mentions**
+   Do instead: All queries now use topic_mentions with O(log n) index hits. Fixed in: advanced-search.ts (topicNames filter), searchByTheme(), strategist-insights.ts getTopGlobalThemes().
+
+2. **[2026-04-15] Bug #2 FIXED: tsquery validation + safe RPC**
+   Do instead: jsonb-search.ts calls match_news_by_tsquery_safe RPC with fallback_to_simple=true. validateTsquery() validates syntax before sending. Prevents crashes from malformed queries.
+
+3. **[2026-04-15] Bug #3 FIXED: Crisis detection now searches by theme.name**
+   Do instead: crisis-detector.ts detectGlobalCrises() uses countRecentTopicMentions(theme.name) from topic-search.ts. Queries denormalized topic_mentions table. Alerts trigger correctly.
+
+## OpenAI & Resilience (2026-04-16)
+1. **[2026-04-16] Candidate 7 DONE: Design B (Resilience Wrapper) implemented**
+   Do instead: Use extractTopicsWithResilient() for explicit control. extractTopicsFromNews() now has automatic retries, dedup, token tracking via wrapper. Config in .env.local: OPENAI_MAX_RETRIES, OPENAI_ENABLE_DEDUP, OPENAI_TOKEN_BUDGET_DAILY. See DESIGN_B_IMPLEMENTATION.md.
+
 ## User Directives

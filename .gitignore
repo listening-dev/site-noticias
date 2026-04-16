@@ -43,3 +43,30 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# optimization documentation (internal reference only)
+.optimization-docs/
+
+# development documentation (should be in .optimization-docs/)
+CANDIDATE_*.md
+DESIGN_*.md
+OPTIMIZATION_*.md
+ARCHITECTURE_*.md
+PIPELINE_*.md
+RESILIENCE_*.md
+BUGS_*.md
+BUG_*.md
+CIRCUIT_*.md
+DELIVERY_*.md
+EXACT_*.md
+FINAL_*.md
+IMPORTANT_*.md
+OPENAI_*.md
+REFACTORING_*.md
+SETUP_*.md
+VERIFICATION_*.md
+SOLUTION_*.md
+PROGRESS_*.md
+DEPLOYMENT_*.md
+JSONB_*.md
+*.txt

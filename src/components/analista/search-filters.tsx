@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, X, ChevronDown } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Search, X, ChevronDown, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { createClient } from '@/lib/supabase/client'
 
 export interface SearchFiltersState {
   query: string
-  dateFrom: string
-  dateTo: string
+  dateFrom: string  // ISO 8601 with time: "2026-04-10T14:30:00"
+  dateTo: string    // ISO 8601 with time: "2026-04-15T18:45:00"
   sentiment: '' | 'positive' | 'neutral' | 'negative'
   categories: string[]
   topics: string[]
@@ -28,27 +29,24 @@ const SENTIMENT_OPTIONS = [
   { value: 'negative', label: '😞 Negativo', color: 'bg-red-100 text-red-800' },
 ]
 
-const CATEGORY_OPTIONS = [
-  'economia',
-  'política',
-  'tecnologia',
-  'saúde',
-  'esportes',
-  'sociedade',
-  'entretenimento',
-]
-
 const SORT_OPTIONS = [
   { value: 'recent', label: 'Mais Recentes' },
   { value: 'trending', label: 'Tendências' },
   { value: 'relevance', label: 'Relevância' },
 ]
 
+function toLocalDatetimeString(date: Date): string {
+  const offset = date.getTimezoneOffset()
+  const local = new Date(date.getTime() - offset * 60000)
+  return local.toISOString().slice(0, 16)
+}
+
 export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps) {
+  const supabase = createClient()
   const [filters, setFilters] = useState<SearchFiltersState>({
     query: '',
-    dateFrom: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    dateTo: new Date().toISOString().split('T')[0],
+    dateFrom: toLocalDatetimeString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+    dateTo: toLocalDatetimeString(new Date()),
     sentiment: '',
     categories: [],
     topics: [],
@@ -56,11 +54,60 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
   })
 
   const [expanded, setExpanded] = useState(true)
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([])
+  const [loadingCategories, setLoadingCategories] = useState(false)
+
+  // Load available categories from Supabase
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        setLoadingCategories(true)
+        const { data: newsData } = await supabase
+          .schema('noticias')
+          .from('news')
+          .select('category')
+          .not('category', 'is', null)
+          .limit(1000)
+
+        const uniqueCategories = Array.from(
+          new Set(newsData?.map((n) => n.category).filter(Boolean) || [])
+        ).sort()
+
+        setCategoryOptions(uniqueCategories as string[])
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error)
+      } finally {
+        setLoadingCategories(false)
+      }
+    }
+
+    loadCategories()
+  }, [])
 
   const handleFilterChange = (newFilters: Partial<SearchFiltersState>) => {
     const updated = { ...filters, ...newFilters }
     setFilters(updated)
-    onFilterChange(updated)
+
+    // Converter datas para ISO completo antes de enviar
+    const filtersToSend = { ...updated }
+    if (updated.dateFrom) {
+      // Formato de entrada: YYYY-MM-DDTHH:mm
+      // Formato de saída: YYYY-MM-DDTHH:mm:ss.000Z (ISO 8601)
+      filtersToSend.dateFrom = normalizeToISO(updated.dateFrom)
+    }
+    if (updated.dateTo) {
+      filtersToSend.dateTo = normalizeToISO(updated.dateTo)
+    }
+
+    onFilterChange(filtersToSend)
+  }
+
+  function normalizeToISO(datetimeLocal: string): string {
+    if (!datetimeLocal.includes('T')) {
+      return datetimeLocal
+    }
+    const date = new Date(`${datetimeLocal}:00`) // Adiciona :00 segundos
+    return date.toISOString()
   }
 
   const toggleCategory = (cat: string) => {
@@ -121,10 +168,10 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
           <div className="space-y-6 border-t pt-6">
             {/* Period */}
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Período</label>
+              <label className="text-sm font-medium text-gray-700 block mb-2">Período (com horário)</label>
               <div className="flex gap-2">
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={filters.dateFrom}
                   onChange={(e) => handleFilterChange({ dateFrom: e.target.value })}
                   className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
@@ -132,13 +179,14 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
                 />
                 <span className="flex items-center text-gray-500">—</span>
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={filters.dateTo}
                   onChange={(e) => handleFilterChange({ dateTo: e.target.value })}
                   className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
                   disabled={isLoading}
                 />
               </div>
+              <p className="text-xs text-gray-500 mt-1">Hora local será preservada na busca</p>
             </div>
 
             {/* Sentiment */}
@@ -168,9 +216,18 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
 
             {/* Categories */}
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Categorias</label>
+              <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                Categorias
+                {loadingCategories && <span className="text-xs text-gray-500">(carregando...)</span>}
+              </label>
+              {categoryOptions.length === 0 && !loadingCategories && (
+                <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                  <AlertCircle className="h-4 w-4" />
+                  Nenhuma categoria encontrada
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
-                {CATEGORY_OPTIONS.map((cat) => (
+                {categoryOptions.map((cat) => (
                   <button
                     key={cat}
                     onClick={() => toggleCategory(cat)}
@@ -179,7 +236,7 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
                         ? 'bg-blue-100 text-blue-800'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
-                    disabled={isLoading}
+                    disabled={isLoading || loadingCategories}
                   >
                     {cat}
                   </button>

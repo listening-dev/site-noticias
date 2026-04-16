@@ -49,50 +49,74 @@ export async function getClientsCrisisStatus(
       return []
     }
 
+    // [Optimization] Batch queries instead of N+1 loop
+    // BEFORE: 1 + 1 + (10 × 3) = 31 queries for 10 clients
+    // AFTER: 1 + 1 + 1 + 1 + 1 = 5 queries (parallel fetch)
+
     const results: ClientCrisisStatus[] = []
+    const clientIdList = clients.map((c) => c.id)
 
+    // Batch Query 1: All themes for all clients
+    const { data: allThemes } = await supabase
+      .schema('noticias')
+      .from('client_themes')
+      .select('client_id, id')
+      .in('client_id', clientIdList)
+      .eq('status', 'active')
+
+    // Batch Query 2: All active crises for all clients
+    const { data: allCrises } = await supabase
+      .schema('noticias')
+      .from('crisis_alerts')
+      .select('*')
+      .in('client_id', clientIdList)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+
+    // Batch Query 3: All global themes (for crisis enrichment)
+    const crisisThemeIds = [...new Set((allCrises || []).map((c) => c.theme_id).filter(Boolean))]
+    const { data: globalThemes } = await supabase
+      .schema('noticias')
+      .from('global_themes')
+      .select('id, name')
+      .in('id', crisisThemeIds)
+
+    // In-memory aggregation (no more DB calls)
+    const themesByClient = new Map<string, string[]>()
+    ;(allThemes || []).forEach((t: any) => {
+      const existing = themesByClient.get(t.client_id) ?? []
+      existing.push(t.id)
+      themesByClient.set(t.client_id, existing)
+    })
+
+    const crisesByClient = new Map<string, any[]>()
+    ;(allCrises || []).forEach((c: any) => {
+      const existing = crisesByClient.get(c.client_id) ?? []
+      existing.push(c)
+      crisesByClient.set(c.client_id, existing)
+    })
+
+    const themeMap = new Map((globalThemes || []).map((t: any) => [t.id, t.name]))
+
+    // Build results from batched data
     for (const client of clients) {
-      // Buscar temas do cliente
-      const { data: themes } = await supabase
-        .schema('noticias')
-        .from('client_themes')
-        .select('id')
-        .eq('client_id', client.id)
-        .eq('status', 'active')
+      const clientThemes = themesByClient.get(client.id) ?? []
+      const clientCrises = (crisesByClient.get(client.id) ?? []).slice(0, 5) // Limit to 5 most recent
 
-      // Buscar crises ativas
-      const { data: crises } = await supabase
-        .schema('noticias')
-        .from('crisis_alerts')
-        .select('*')
-        .eq('client_id', client.id)
-        .is('ended_at', null)
-        .order('started_at', { ascending: false })
-        .limit(5)
-
-      // Encontrar tema com maior severidade
       let topCritical = undefined
-      if (crises && crises.length > 0) {
-        const critical = crises.find((c) => c.severity === 'critical')
+      if (clientCrises.length > 0) {
+        const critical = clientCrises.find((c) => c.severity === 'critical')
         if (critical) {
-          // Buscar nome do tema
-          const { data: theme } = await supabase
-            .schema('noticias')
-            .from('global_themes')
-            .select('name')
-            .eq('id', critical.theme_id)
-            .single()
-
-          topCritical = theme?.name
+          topCritical = themeMap.get(critical.theme_id)
         }
       }
 
       results.push({
         client_id: client.id,
         client_name: client.name,
-        total_themes: themes?.length || 0,
-        active_crises: crises?.length || 0,
-        recent_alerts: crises || [],
+        total_themes: clientThemes.length,
+        active_crises: clientCrises.length,
+        recent_alerts: clientCrises,
         top_critical_theme: topCritical,
       })
     }

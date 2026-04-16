@@ -214,7 +214,7 @@ export async function detectGlobalCrises(
     const { data: globalThemes } = await supabase
       .schema('noticias')
       .from('global_themes')
-      .select('id')
+      .select('id, name')
       .eq('status', 'active')
 
     if (!globalThemes || globalThemes.length === 0) {
@@ -223,23 +223,13 @@ export async function detectGlobalCrises(
 
     const results: CrisisDetectionResult[] = []
 
+    // Import da função otimizada com denormalização
+    const { countRecentTopicMentions } = await import('./topic-search')
+
     for (const theme of globalThemes) {
-      // Contar quantas notícias foram extraídas com este tópico
-      // Simplesmente buscar todas as menções de um tema global nos últimos N minutos
-      // (Por enquanto, usamos um threshold fixo para temas globais)
+      // Contar menções recentes usando tabela denormalizada (O(log n) com índice)
+      const matchCount = await countRecentTopicMentions(supabase, theme.name, timeWindowMinutes)
 
-      const { data: topicMatches } = await supabase
-        .schema('noticias')
-        .from('news_topics')
-        .select('id', { count: 'exact' })
-        .gte('extracted_at', sinceTime)
-        .filter(
-          'topics',
-          'ilike',
-          `%${theme.id}%` // Busca simples (idealmente usaria índice GIN)
-        )
-
-      const matchCount = topicMatches?.length || 0
       const globalThreshold = 10
 
       if (matchCount >= globalThreshold) {
