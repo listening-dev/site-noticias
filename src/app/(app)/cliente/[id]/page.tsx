@@ -23,7 +23,7 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
   const now = new Date()
   const to = sp.to ? new Date(sp.to) : now
-  const from = sp.from ? new Date(sp.from) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const from = sp.from ? new Date(sp.from) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
