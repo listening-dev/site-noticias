@@ -291,7 +291,8 @@ export function validateTsquery(tsqueryText: string): TsqueryValidationResult {
 export async function matchNewsByTsquery(
   supabase: AppSupabaseClient,
   tsqueryText: string,
-  sinceDate?: string
+  sinceDate?: string,
+  sourceIds?: string[] | null
 ): Promise<Array<{ id: string }>> {
   // Validar tsquery
   const validation = validateTsquery(tsqueryText)
@@ -304,7 +305,7 @@ export async function matchNewsByTsquery(
   const since = sinceDate || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
   try {
-    console.log(`[Tsquery] Executando match com tsquery: "${validation.normalized}"`)
+    console.log(`[Tsquery] Executando match com tsquery: "${validation.normalized}"${sourceIds?.length ? ` (restrito a ${sourceIds.length} fontes)` : ''}`)
 
     const { data: matchedNews, error } = await supabase
       .schema('noticias')
@@ -312,6 +313,7 @@ export async function matchNewsByTsquery(
         tsquery_text: validation.normalized,
         since_date: since,
         fallback_to_simple: true,
+        source_ids: sourceIds && sourceIds.length > 0 ? sourceIds : null,
       })
 
     if (error) {

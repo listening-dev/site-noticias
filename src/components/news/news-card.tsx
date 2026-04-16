@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, Star, CheckCheck, Clock, Loader2 } from 'lucide-react'
+import { ExternalLink, Star, CheckCheck, Clock, Loader2, Filter } from 'lucide-react'
 import { News, Source } from '@/lib/types/database'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,9 +14,10 @@ interface NewsCardProps {
   isFavorited?: boolean
   isRead?: boolean
   keywords?: string[]
+  matchedFilter?: { label: string | null; boolean_query: string } | null
 }
 
-export function NewsCard({ news, isFavorited = false, isRead = false, keywords = [] }: NewsCardProps) {
+export function NewsCard({ news, isFavorited = false, isRead = false, keywords = [], matchedFilter = null }: NewsCardProps) {
   const [favorited, setFavorited] = useState(isFavorited)
   const [read, setRead] = useState(isRead)
   const [isSavingFavorite, setIsSavingFavorite] = useState(false)
@@ -99,10 +100,21 @@ export function NewsCard({ news, isFavorited = false, isRead = false, keywords =
             />
           )}
 
-          {/* Data */}
-          <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
-            <Clock size={12} />
-            <RelativeTime date={news.published_at} />
+          {/* Data + filtro que casou */}
+          <div className="flex items-center gap-3 mt-2 text-xs text-gray-400 flex-wrap">
+            <span className="flex items-center gap-1">
+              <Clock size={12} />
+              <RelativeTime date={news.published_at} />
+            </span>
+            {matchedFilter && (
+              <span
+                className="flex items-center gap-1 text-blue-600"
+                title={`Casou com: ${matchedFilter.boolean_query}`}
+              >
+                <Filter size={11} />
+                Filtro: {matchedFilter.label || 'sem label'}
+              </span>
+            )}
           </div>
         </div>
 

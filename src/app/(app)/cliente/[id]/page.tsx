@@ -5,7 +5,7 @@ import { NewsFilters } from '@/components/news/news-filters'
 import { PeriodSelector } from '@/components/report/period-selector'
 import { Badge } from '@/components/ui/badge'
 import { extractKeywords } from '@/services/boolean-search'
-import { Filter, Newspaper } from 'lucide-react'
+import { AlertTriangle, Filter, Newspaper } from 'lucide-react'
 import { Source } from '@/lib/types/database'
 
 interface PageProps {
@@ -28,7 +28,6 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Buscar cliente
   const { data: client } = await supabase
     .schema('noticias')
     .from('clients')
@@ -38,102 +37,63 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
   if (!client) notFound()
 
-  // Buscar filtros do cliente
-  const { data: filters } = await supabase
-    .schema('noticias')
-    .from('client_filters')
-    .select('*')
-    .eq('client_id', id)
-    .eq('active', true)
-
-  // Buscar fontes vinculadas ao cliente
-  const { data: clientSources } = await supabase
-    .schema('noticias')
-    .from('client_sources')
-    .select('source_id, sources(*)')
-    .eq('client_id', id)
+  const [{ data: filters }, { data: clientSources }] = await Promise.all([
+    supabase
+      .schema('noticias')
+      .from('client_filters')
+      .select('*')
+      .eq('client_id', id)
+      .eq('active', true),
+    supabase
+      .schema('noticias')
+      .from('client_sources')
+      .select('source_id, sources(*)')
+      .eq('client_id', id),
+  ])
 
   const linkedSources: Source[] = (clientSources ?? []).map((cs: any) => cs.sources).filter(Boolean)
-  const linkedSourceIds = linkedSources.map((s) => s.id)
-  const hasLinkedSources = linkedSourceIds.length > 0
+  const hasLinkedSources = linkedSources.length > 0
+  const hasActiveFilters = !!filters && filters.length > 0
 
-  // Buscar categorias das fontes vinculadas para filtros
   const linkedCategories = hasLinkedSources
-    ? [...new Set(linkedSources.map((s) => s.category).filter(Boolean))] as string[]
+    ? ([...new Set(linkedSources.map((s) => s.category).filter(Boolean))] as string[])
     : []
 
-  // Buscar notícias: matches booleanos + notícias das fontes vinculadas
+  // Fonte única de verdade: client_news.
+  // Matcher já aplica (boolean AND linked_sources quando houver).
+  // Cliente sem filtros ativos → sem notícias (modo estrito).
   let newsItems: any[] = []
   let totalCount = 0
 
-  // 1. Matches booleanos (client_news)
-  const { data: clientNews } = await supabase
-    .schema('noticias')
-    .from('client_news')
-    .select('news_id, news(*, sources(*))')
-    .eq('client_id', id)
-    .gte('matched_at', from.toISOString())
-    .lte('matched_at', to.toISOString())
-
-  const matchedNews = (clientNews ?? []).map((cn: any) => cn.news).filter(Boolean)
-
-  // 2. Notícias das fontes vinculadas
-  let sourceNews: any[] = []
-  if (hasLinkedSources) {
-    let sourceQuery = supabase
+  if (hasActiveFilters) {
+    let query = supabase
       .schema('noticias')
-      .from('news')
-      .select('*, sources(*)')
-      .in('source_id', linkedSourceIds)
-      .gte('published_at', from.toISOString())
-      .lte('published_at', to.toISOString())
-      .order('published_at', { ascending: false })
-      .limit(3000)
+      .from('client_news')
+      .select('news_id, filter_id, news!inner(*, sources(*))', { count: 'exact' })
+      .eq('client_id', id)
+      .gte('news.published_at', from.toISOString())
+      .lte('news.published_at', to.toISOString())
+      .order('published_at', { foreignTable: 'news', ascending: false })
 
-    if (sp.source) sourceQuery = sourceQuery.eq('source_id', sp.source)
-    if (sp.category) sourceQuery = sourceQuery.eq('category', sp.category)
+    if (sp.source) query = query.eq('news.source_id', sp.source)
+    if (sp.category) query = query.eq('news.category', sp.category)
 
-    const { data } = await sourceQuery
-    sourceNews = data ?? []
+    const { data, count } = await query.range(rangeFrom, rangeTo)
+
+    newsItems = (data ?? []).map((row: any) => ({ ...row.news, _filter_id: row.filter_id }))
+    totalCount = count ?? 0
   }
 
-  // 3. Mesclar e deduplicar por news.id
-  const seenIds = new Set<string>()
-  const allNews: any[] = []
-
-  // Fontes vinculadas primeiro (mais recentes no topo)
-  for (const n of sourceNews) {
-    if (!seenIds.has(n.id)) {
-      seenIds.add(n.id)
-      allNews.push(n)
-    }
-  }
-  // Depois matches booleanos
-  for (const n of matchedNews) {
-    if (!seenIds.has(n.id)) {
-      seenIds.add(n.id)
-      allNews.push(n)
-    }
-  }
-
-  // Ordenar por data de publicação
-  allNews.sort((a, b) => {
-    const da = new Date(a.published_at || 0).getTime()
-    const db = new Date(b.published_at || 0).getTime()
-    return db - da
-  })
-
-  totalCount = allNews.length
-
-  // Paginar
-  newsItems = allNews.slice(rangeFrom, rangeTo + 1)
   const totalPages = Math.ceil(totalCount / pageSize) || 1
 
-  // Extrair keywords de todos os filtros ativos (para highlight)
   const allKeywords = (filters ?? []).flatMap((f: any) => extractKeywords(f.boolean_query))
   const uniqueKeywords = [...new Set(allKeywords)]
 
-  // Buscar favoritos e lidas
+  const filtersById = new Map<string, { label: string | null; boolean_query: string }>()
+  for (const f of filters ?? []) {
+    filtersById.set(f.id, { label: f.label, boolean_query: f.boolean_query })
+  }
+
   const newsIds = newsItems.map((n: any) => n.id)
   const [{ data: favorites }, { data: readNews }] = await Promise.all([
     user && newsIds.length
@@ -159,7 +119,6 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
   return (
     <div>
-      {/* Cabeçalho do cliente */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">{client.name}</h2>
         {client.description && (
@@ -170,24 +129,35 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
         </p>
       </div>
 
+      {!hasActiveFilters && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-amber-900">Este cliente não tem filtros booleanos ativos.</p>
+            <p className="text-amber-700 mt-1">
+              Nenhuma notícia será exibida até que ao menos um filtro seja configurado.{' '}
+              <a href={`/admin/clientes/${id}`} className="underline font-medium">Configurar filtros →</a>
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6">
         <PeriodSelector from={from.toISOString()} to={to.toISOString()} />
       </div>
 
-      {/* Filtros de portal (quando há fontes vinculadas) */}
       {hasLinkedSources && (
         <NewsFilters sources={linkedSources} categories={linkedCategories} />
       )}
 
-      {/* Filtros booleanos ativos */}
-      {filters && filters.length > 0 && (
+      {hasActiveFilters && (
         <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Filter size={14} className="text-blue-600" />
             <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Filtros de busca ativos</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {filters.map((filter: any) => (
+            {filters!.map((filter: any) => (
               <div key={filter.id} className="flex flex-col gap-0.5">
                 {filter.label && <span className="text-xs text-blue-600 font-medium">{filter.label}</span>}
                 <Badge variant="outline" className="text-xs font-mono border-blue-200 text-blue-800 bg-white">
@@ -199,7 +169,6 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
         </div>
       )}
 
-      {/* Lista de notícias */}
       {newsItems.length > 0 ? (
         <>
           <div className="grid gap-3">
@@ -210,11 +179,11 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
                 isFavorited={favoritedIds.has(item.id)}
                 isRead={readIds.has(item.id)}
                 keywords={uniqueKeywords}
+                matchedFilter={item._filter_id ? filtersById.get(item._filter_id) ?? null : null}
               />
             ))}
           </div>
 
-          {/* Paginação */}
           {totalPages > 1 && (
             <div className="flex justify-center gap-2 mt-8">
               {page > 1 && (
@@ -231,17 +200,15 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
             </div>
           )}
         </>
-      ) : (
+      ) : hasActiveFilters ? (
         <div className="text-center py-16 text-gray-400">
           <Newspaper className="h-12 w-12 mx-auto mb-4 opacity-30" />
           <p className="text-lg font-medium">Nenhuma notícia encontrada</p>
           <p className="text-sm mt-1">
-            {(filters && filters.length > 0) || hasLinkedSources
-              ? 'Nenhum resultado no período selecionado. Ajuste o período ou aguarde a próxima coleta.'
-              : 'Configure filtros booleanos ou vincule fontes para este cliente na área de administração.'}
+            Nenhum resultado no período selecionado. Ajuste o período ou aguarde a próxima coleta.
           </p>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

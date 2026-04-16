@@ -12,61 +12,145 @@ export interface MatchResult {
   matched: number
 }
 
-export async function matchNewsForAllClients(supabase: AppSupabaseClient, sinceHours = 24): Promise<MatchResult[]> {
+/**
+ * Regra arquitetural (Y estrito, pós-migration 011-013):
+ *
+ *   Notícia entra em client_news se, e somente se:
+ *     - match ≥ 1 booleana ativa do cliente
+ *     - AND (cliente não tem client_sources) OU (fonte da notícia ∈ client_sources)
+ *
+ * Cliente sem nenhum client_filters ativo não recebe nenhuma notícia.
+ * Não existe mais o caminho "source-linked sem booleana".
+ */
+export async function matchNewsForAllClients(
+  supabase: AppSupabaseClient,
+  sinceHours = 24,
+): Promise<MatchResult[]> {
   const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString()
 
-  // 1. Match por filtros booleanos
-  const { data: filters, error } = await supabase
-    .schema('noticias')
-    .from('client_filters')
-    .select('*')
-    .eq('active', true)
+  const [{ data: filters, error: filtersError }, sourceMap] = await Promise.all([
+    supabase.schema('noticias').from('client_filters').select('*').eq('active', true),
+    loadClientSourceMap(supabase),
+  ])
 
-  if (error || !filters) {
-    console.error('[Matcher] Erro ao buscar filtros:', error)
+  if (filtersError || !filters) {
+    console.error('[Matcher] Erro ao buscar filtros:', filtersError)
     return []
   }
 
-  // [Optimization #1] Use semaphore to control RPC concurrency (max 10 concurrent)
-  // Prevents connection pool saturation with unbounded Promise.allSettled
-  const results: MatchResult[] = []
   const maxConcurrency = Math.min(10, Math.max(5, filters.length / 10))
 
   try {
     const filterResults = await processBatchWithSemaphore(
       filters,
-      (filter: ClientFilter) => matchFilter(supabase, filter, since),
+      (filter: ClientFilter) =>
+        matchFilter(supabase, filter, since, sourceMap.get(filter.client_id) ?? null),
       maxConcurrency,
       {
         onProgress: (completed, total) => {
           if (completed % 10 === 0) {
-            console.log(`[Matcher] Processed ${completed}/${total} filters with concurrency=${maxConcurrency}`)
+            console.log(
+              `[Matcher] Processed ${completed}/${total} filters with concurrency=${maxConcurrency}`,
+            )
           }
         },
-      }
+      },
     )
 
-    results.push(...filterResults.filter((r): r is MatchResult => r !== null))
+    return filterResults.filter((r): r is MatchResult => r !== null)
   } catch (error) {
     console.error('[Matcher] Error processing filters with semaphore:', error)
+    return []
   }
-
-  // 2. Match por fontes vinculadas (client_sources)
-  const sourceResults = await matchByLinkedSources(supabase, since)
-  results.push(...sourceResults)
-
-  return results
 }
 
-async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, since: string): Promise<MatchResult> {
+/**
+ * Reprocessa client_news de um cliente específico apagando e recriando
+ * matches dentro de uma janela de tempo.
+ *
+ * Usado pelo endpoint POST /api/admin/clientes/[id]/reprocessar após
+ * edição de booleanas, para garantir consistência entre a regra salva
+ * e os matches armazenados.
+ */
+export async function reprocessClient(
+  supabase: AppSupabaseClient,
+  clientId: string,
+  windowDays: number,
+  filterId?: string,
+): Promise<{ deleted: number; matched: number; filters: number }> {
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString()
+
+  const [{ data: sourceRows }, filtersResult] = await Promise.all([
+    supabase.schema('noticias').from('client_sources').select('source_id').eq('client_id', clientId),
+    (() => {
+      let q = supabase
+        .schema('noticias')
+        .from('client_filters')
+        .select('*')
+        .eq('client_id', clientId)
+        .eq('active', true)
+      if (filterId) q = q.eq('id', filterId)
+      return q
+    })(),
+  ])
+
+  const sourceIds = (sourceRows ?? []).map((s: any) => s.source_id as string)
+  const filters = (filtersResult.data ?? []) as ClientFilter[]
+
+  if (filters.length === 0) {
+    return { deleted: 0, matched: 0, filters: 0 }
+  }
+
+  let deleteQuery = supabase
+    .schema('noticias')
+    .from('client_news')
+    .delete({ count: 'exact' })
+    .eq('client_id', clientId)
+    .gte('matched_at', since)
+  if (filterId) deleteQuery = deleteQuery.eq('filter_id', filterId)
+
+  const { count: deleted } = await deleteQuery
+
+  const results = await Promise.all(
+    filters.map((f) => matchFilter(supabase, f, since, sourceIds.length > 0 ? sourceIds : null)),
+  )
+  const matched = results.reduce((acc, r) => acc + r.matched, 0)
+
+  return { deleted: deleted ?? 0, matched, filters: filters.length }
+}
+
+async function loadClientSourceMap(
+  supabase: AppSupabaseClient,
+): Promise<Map<string, string[]>> {
+  const { data, error } = await supabase
+    .schema('noticias')
+    .from('client_sources')
+    .select('client_id, source_id')
+
+  const map = new Map<string, string[]>()
+  if (error || !data) return map
+
+  for (const row of data) {
+    const arr = map.get(row.client_id) ?? []
+    arr.push(row.source_id)
+    map.set(row.client_id, arr)
+  }
+  return map
+}
+
+async function matchFilter(
+  supabase: AppSupabaseClient,
+  filter: ClientFilter,
+  since: string,
+  sourceIds: string[] | null,
+): Promise<MatchResult> {
   const tsquery = filter.tsquery_value || booleanQueryToTsquery(filter.boolean_query)
 
   if (!tsquery) {
     return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }
   }
 
-  // Usar função consolidada que valida tsquery antes de RPC
-  const matchedNews = await matchNewsByTsquery(supabase, tsquery, since)
+  const matchedNews = await matchNewsByTsquery(supabase, tsquery, since, sourceIds)
 
   if (matchedNews.length === 0) {
     return { client_id: filter.client_id, filter_id: filter.id, matched: 0 }
@@ -88,58 +172,4 @@ async function matchFilter(supabase: AppSupabaseClient, filter: ClientFilter, si
   }
 
   return { client_id: filter.client_id, filter_id: filter.id, matched: matchedNews.length }
-}
-
-async function matchByLinkedSources(supabase: AppSupabaseClient, since: string): Promise<MatchResult[]> {
-  // Buscar todas as associações client_sources
-  const { data: clientSources, error } = await supabase
-    .schema('noticias')
-    .from('client_sources')
-    .select('client_id, source_id')
-
-  if (error || !clientSources || clientSources.length === 0) return []
-
-  // Agrupar source_ids por client_id
-  const clientSourceMap = new Map<string, string[]>()
-  for (const cs of clientSources) {
-    const existing = clientSourceMap.get(cs.client_id) ?? []
-    existing.push(cs.source_id)
-    clientSourceMap.set(cs.client_id, existing)
-  }
-
-  const results: MatchResult[] = []
-
-  for (const [clientId, sourceIds] of clientSourceMap) {
-    // Buscar notícias dessas fontes no período
-    const { data: news, error: newsError } = await supabase
-      .schema('noticias')
-      .from('news')
-      .select('id')
-      .in('source_id', sourceIds)
-      .gte('published_at', since)
-
-    if (newsError || !news || news.length === 0) {
-      results.push({ client_id: clientId, filter_id: 'source-linked', matched: 0 })
-      continue
-    }
-
-    const records = news.map((n: { id: string }) => ({
-      client_id: clientId,
-      news_id: n.id,
-      filter_id: null,
-    }))
-
-    const { error: insertError } = await supabase
-      .schema('noticias')
-      .from('client_news')
-      .upsert(records, { onConflict: 'client_id,news_id', ignoreDuplicates: true })
-
-    if (insertError) {
-      console.error(`[Matcher] Erro ao inserir client_news para fontes vinculadas (client ${clientId}):`, insertError)
-    }
-
-    results.push({ client_id: clientId, filter_id: 'source-linked', matched: news.length })
-  }
-
-  return results
 }
