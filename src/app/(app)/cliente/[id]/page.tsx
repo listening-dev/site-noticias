@@ -4,7 +4,7 @@ import { NewsCard } from '@/components/news/news-card'
 import { NewsFilters } from '@/components/news/news-filters'
 import { PeriodSelector } from '@/components/report/period-selector'
 import { extractKeywords } from '@/services/boolean-search'
-import { AlertTriangle, Newspaper } from 'lucide-react'
+import { AlertTriangle, Info, Newspaper } from 'lucide-react'
 import { Source } from '@/lib/types/database'
 
 interface PageProps {
@@ -59,12 +59,15 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
     : []
 
   // Fonte única de verdade: client_news.
-  // Matcher já aplica (boolean AND linked_sources quando houver).
-  // Cliente sem filtros ativos → sem notícias (modo estrito).
+  // Modo Y estrito (com filtros) ou modo fonte aberta (sem filtros + com fontes).
+  // Sem filtros e sem fontes → nada exibido.
+  const openSourceMode = !hasActiveFilters && hasLinkedSources
+  const shouldQuery = hasActiveFilters || openSourceMode
+
   let newsItems: any[] = []
   let totalCount = 0
 
-  if (hasActiveFilters) {
+  if (shouldQuery) {
     let query = supabase
       .schema('noticias')
       .from('client_news')
@@ -128,14 +131,32 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
         </p>
       </div>
 
-      {!hasActiveFilters && (
+      {openSourceMode && (
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
+          <Info size={18} className="text-blue-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-blue-900">
+              Modo fonte aberta: exibindo todas as notícias de {linkedSources.length}{' '}
+              {linkedSources.length === 1 ? 'fonte vinculada' : 'fontes vinculadas'}.
+            </p>
+            <p className="text-blue-700 mt-1">
+              Nenhum filtro booleano ativo.{' '}
+              <a href={`/admin/clientes/${id}`} className="underline font-medium">
+                Gerenciar filtros e fontes →
+              </a>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!hasActiveFilters && !hasLinkedSources && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
           <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
           <div className="text-sm">
-            <p className="font-medium text-amber-900">Este cliente não tem filtros booleanos ativos.</p>
+            <p className="font-medium text-amber-900">Este cliente não tem filtros nem fontes vinculadas.</p>
             <p className="text-amber-700 mt-1">
-              Nenhuma notícia será exibida até que ao menos um filtro seja configurado.{' '}
-              <a href={`/admin/clientes/${id}`} className="underline font-medium">Configurar filtros →</a>
+              Nenhuma notícia será exibida até que ao menos um filtro ou fonte seja configurado.{' '}
+              <a href={`/admin/clientes/${id}`} className="underline font-medium">Configurar →</a>
             </p>
           </div>
         </div>
@@ -180,7 +201,7 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
             </div>
           )}
         </>
-      ) : hasActiveFilters ? (
+      ) : shouldQuery ? (
         <div className="text-center py-16 text-gray-400">
           <Newspaper className="h-12 w-12 mx-auto mb-4 opacity-30" />
           <p className="text-lg font-medium">Nenhuma notícia encontrada</p>

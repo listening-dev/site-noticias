@@ -13,14 +13,17 @@ export interface MatchResult {
 }
 
 /**
- * Regra arquitetural (Y estrito, pós-migration 011-013):
+ * Regra arquitetural (Y estrito + modo fonte aberta, pós-migration 011-013):
  *
- *   Notícia entra em client_news se, e somente se:
- *     - match ≥ 1 booleana ativa do cliente
- *     - AND (cliente não tem client_sources) OU (fonte da notícia ∈ client_sources)
+ *   Cliente COM ≥1 client_filters ativo → modo Y estrito:
+ *     notícia entra se match ≥ 1 booleana ativa
+ *     AND (sem client_sources) OU (fonte ∈ client_sources)
  *
- * Cliente sem nenhum client_filters ativo não recebe nenhuma notícia.
- * Não existe mais o caminho "source-linked sem booleana".
+ *   Cliente SEM filtros ativos MAS COM client_sources → modo fonte aberta:
+ *     notícia entra se fonte ∈ client_sources (sem booleana)
+ *     filter_id = NULL nas linhas geradas
+ *
+ *   Cliente sem filtros ativos E sem client_sources → não recebe nada.
  */
 export async function matchNewsForAllClients(
   supabase: AppSupabaseClient,
@@ -38,26 +41,42 @@ export async function matchNewsForAllClients(
     return []
   }
 
+  const clientsWithFilters = new Set(filters.map((f) => f.client_id))
+  const openSourceClients: string[] = []
+  for (const clientId of sourceMap.keys()) {
+    if (!clientsWithFilters.has(clientId)) openSourceClients.push(clientId)
+  }
+
   const maxConcurrency = Math.min(10, Math.max(5, filters.length / 10))
 
   try {
-    const filterResults = await processBatchWithSemaphore(
-      filters,
-      (filter: ClientFilter) =>
-        matchFilter(supabase, filter, since, sourceMap.get(filter.client_id) ?? null),
-      maxConcurrency,
-      {
-        onProgress: (completed, total) => {
-          if (completed % 10 === 0) {
-            console.log(
-              `[Matcher] Processed ${completed}/${total} filters with concurrency=${maxConcurrency}`,
-            )
-          }
+    const [filterResults, openResults] = await Promise.all([
+      processBatchWithSemaphore(
+        filters,
+        (filter: ClientFilter) =>
+          matchFilter(supabase, filter, since, sourceMap.get(filter.client_id) ?? null),
+        maxConcurrency,
+        {
+          onProgress: (completed, total) => {
+            if (completed % 10 === 0) {
+              console.log(
+                `[Matcher] Processed ${completed}/${total} filters with concurrency=${maxConcurrency}`,
+              )
+            }
+          },
         },
-      },
-    )
+      ),
+      processBatchWithSemaphore(
+        openSourceClients,
+        (clientId: string) =>
+          matchOpenSource(supabase, clientId, sourceMap.get(clientId) ?? [], since),
+        Math.min(5, Math.max(1, openSourceClients.length)),
+      ),
+    ])
 
-    return filterResults.filter((r): r is MatchResult => r !== null)
+    return [...filterResults, ...openResults].filter(
+      (r): r is MatchResult => r !== null,
+    )
   } catch (error) {
     console.error('[Matcher] Error processing filters with semaphore:', error)
     return []
@@ -97,8 +116,21 @@ export async function reprocessClient(
   const sourceIds = (sourceRows ?? []).map((s: any) => s.source_id as string)
   const filters = (filtersResult.data ?? []) as ClientFilter[]
 
+  // Modo fonte aberta: sem filtros ativos + com fontes vinculadas → firehose das fontes.
   if (filters.length === 0) {
-    return { deleted: 0, matched: 0, filters: 0 }
+    if (filterId || sourceIds.length === 0) {
+      return { deleted: 0, matched: 0, filters: 0 }
+    }
+
+    const { count: deleted } = await supabase
+      .schema('noticias')
+      .from('client_news')
+      .delete({ count: 'exact' })
+      .eq('client_id', clientId)
+      .gte('matched_at', since)
+
+    const result = await matchOpenSource(supabase, clientId, sourceIds, since)
+    return { deleted: deleted ?? 0, matched: result.matched, filters: 0 }
   }
 
   let deleteQuery = supabase
@@ -136,6 +168,47 @@ async function loadClientSourceMap(
     map.set(row.client_id, arr)
   }
   return map
+}
+
+async function matchOpenSource(
+  supabase: AppSupabaseClient,
+  clientId: string,
+  sourceIds: string[],
+  since: string,
+): Promise<MatchResult> {
+  if (sourceIds.length === 0) {
+    return { client_id: clientId, filter_id: '', matched: 0 }
+  }
+
+  const { data: newsRows, error } = await supabase
+    .schema('noticias')
+    .from('news')
+    .select('id')
+    .in('source_id', sourceIds)
+    .gte('published_at', since)
+    .limit(5000)
+
+  if (error || !newsRows || newsRows.length === 0) {
+    if (error) console.error('[Matcher][open-source] erro ao buscar news:', error)
+    return { client_id: clientId, filter_id: '', matched: 0 }
+  }
+
+  const records = newsRows.map((n: { id: string }) => ({
+    client_id: clientId,
+    news_id: n.id,
+    filter_id: null,
+  }))
+
+  const { error: insertError } = await supabase
+    .schema('noticias')
+    .from('client_news')
+    .upsert(records, { onConflict: 'client_id,news_id', ignoreDuplicates: true })
+
+  if (insertError) {
+    console.error('[Matcher][open-source] erro ao inserir client_news:', insertError)
+  }
+
+  return { client_id: clientId, filter_id: '', matched: newsRows.length }
 }
 
 async function matchFilter(
