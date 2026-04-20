@@ -26,12 +26,14 @@ export function Sidebar({ clients, profile }: SidebarProps) {
         {/* Visão geral */}
         <NavItem href="/" icon={<Home size={18} />} label="Visão Geral" active={pathname === '/'} />
 
-        {/* Analista de Mídia */}
+        {/* Busca Avançada — analista + admin */}
         {(profile?.role === 'analyst' || profile?.role === 'admin') && (
-          <>
-            <NavItem href="/analista" icon={<LayoutDashboard size={18} />} label="Dashboard Análise" active={pathname.startsWith('/analista')} />
-            <NavItem href="/busca" icon={<Search size={18} />} label="Busca Avançada" active={pathname.startsWith('/busca')} />
-          </>
+          <NavItem href="/busca" icon={<Search size={18} />} label="Busca Avançada" active={pathname.startsWith('/busca')} />
+        )}
+
+        {/* Dashboard Análise — só admin */}
+        {profile?.role === 'admin' && (
+          <NavItem href="/analista" icon={<LayoutDashboard size={18} />} label="Dashboard Análise" active={pathname.startsWith('/analista')} />
         )}
 
         {/* Account Manager */}
