@@ -7,26 +7,13 @@ export interface GlobalThemeStats {
   theme_id: string
   theme_name: string
   mention_count: number
-  sentiment_distribution: {
-    positive: number
-    neutral: number
-    negative: number
-  }
   trending: boolean
   recent_spike: boolean
-}
-
-export interface SentimentOverview {
-  positive_percentage: number
-  neutral_percentage: number
-  negative_percentage: number
-  total_news: number
 }
 
 export interface TopTrendingTheme {
   name: string
   mention_count: number
-  sentiment: 'positive' | 'neutral' | 'negative'
   trend_direction: 'up' | 'down' | 'stable'
 }
 
@@ -48,12 +35,12 @@ export async function getTopGlobalThemes(
     const sinceDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
     const { paginateRows } = await import('@/lib/supabase/paginate')
-    const rows = await paginateRows<{ category: string | null; sentiment: string | null }>(
+    const rows = await paginateRows<{ category: string | null }>(
       () =>
         supabase
           .schema('noticias')
           .from('news_topics')
-          .select('category, sentiment')
+          .select('category')
           .gte('extracted_at', sinceDate),
       { context: 'TopGlobalThemes' },
     )
@@ -61,19 +48,14 @@ export async function getTopGlobalThemes(
     if (rows.length === 0) return []
 
     // Agrupa por categoria
-    const map = new Map<string, { count: number; positive: number; neutral: number; negative: number }>()
+    const map = new Map<string, number>()
     for (const r of rows) {
       const cat = (r.category || 'outros').toLowerCase().trim()
-      const entry = map.get(cat) ?? { count: 0, positive: 0, neutral: 0, negative: 0 }
-      entry.count++
-      if (r.sentiment === 'positive') entry.positive++
-      else if (r.sentiment === 'neutral') entry.neutral++
-      else if (r.sentiment === 'negative') entry.negative++
-      map.set(cat, entry)
+      map.set(cat, (map.get(cat) ?? 0) + 1)
     }
 
     const sorted = [...map.entries()]
-      .map(([cat, stats]) => ({ cat, ...stats }))
+      .map(([cat, count]) => ({ cat, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, limit)
 
@@ -84,7 +66,6 @@ export async function getTopGlobalThemes(
           theme_id: s.cat,
           theme_name: capitalize(s.cat),
           mention_count: s.count,
-          sentiment_distribution: { positive: s.positive, neutral: s.neutral, negative: s.negative },
           trending: s.count > 10,
           recent_spike: spike,
         } as GlobalThemeStats
@@ -134,58 +115,6 @@ async function detectCategorySpike(
   const priorCount = prior.count ?? 0
 
   return recentCount >= 5 && recentCount >= 2 * Math.max(priorCount, 1)
-}
-
-/**
- * Calcula visão geral de sentimento usando count exato por categoria.
- * Evita o cap de 1000 rows do PostgREST (antes, buscávamos todas as rows
- * e contávamos no JS, o que truncava o total em 1000).
- */
-export async function getSentimentOverview(
-  supabase: AppSupabaseClient,
-  daysBack = 7
-): Promise<SentimentOverview> {
-  try {
-    const sinceDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
-
-    const buildCount = (sentiment: 'positive' | 'neutral' | 'negative') =>
-      supabase
-        .schema('noticias')
-        .from('news_topics')
-        .select('id', { count: 'exact', head: true })
-        .gte('extracted_at', sinceDate)
-        .eq('sentiment', sentiment)
-
-    const [{ count: pos }, { count: neu }, { count: neg }] = await Promise.all([
-      buildCount('positive'),
-      buildCount('neutral'),
-      buildCount('negative'),
-    ])
-
-    const positive = pos ?? 0
-    const neutral = neu ?? 0
-    const negative = neg ?? 0
-    const total = positive + neutral + negative
-
-    if (total === 0) {
-      return { positive_percentage: 0, neutral_percentage: 0, negative_percentage: 0, total_news: 0 }
-    }
-
-    return {
-      positive_percentage: Math.round((positive / total) * 100),
-      neutral_percentage: Math.round((neutral / total) * 100),
-      negative_percentage: Math.round((negative / total) * 100),
-      total_news: total,
-    }
-  } catch (error) {
-    console.error('[StrategistInsights] Erro ao calcular sentimento:', error)
-    return {
-      positive_percentage: 0,
-      neutral_percentage: 0,
-      negative_percentage: 0,
-      total_news: 0,
-    }
-  }
 }
 
 /**
@@ -256,7 +185,9 @@ export async function getGlobalCrises(
 }
 
 /**
- * Gera recomendações de campanha baseadas em trending topics
+ * Gera recomendações baseadas em crescimento de volume (trending).
+ * Compara últimos 7 dias com os 7 anteriores: categoria que mais cresceu em
+ * volume absoluto aparece no topo. Sem ranking por sentimento — só volume.
  */
 export async function getCampaignRecommendations(
   supabase: AppSupabaseClient,
@@ -266,40 +197,75 @@ export async function getCampaignRecommendations(
     theme: string
     opportunity_score: number
     reason: string
-    sentiment: string
   }>
 > {
   try {
-    const themes = await getTopGlobalThemes(supabase, 20, 7)
-    const sentiment = await getSentimentOverview(supabase, 7)
+    const now = Date.now()
+    const recentSince = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const priorSince = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString()
 
-    // Scoring simplificado: temas trending com sentimento positivo = boas oportunidades
-    const recommendations = themes
-      .map((t) => {
-        const positiveSentiment = t.sentiment_distribution.positive
-        const totalSentiment = Object.values(t.sentiment_distribution).reduce((a, b) => a + b, 0)
-        const positivityRatio = totalSentiment > 0 ? positiveSentiment / totalSentiment : 0
+    const { paginateRows } = await import('@/lib/supabase/paginate')
 
-        let reason = ''
-        if (t.trending && positivityRatio > 0.6) {
-          reason = 'Trending com sentimento altamente positivo'
-        } else if (t.trending) {
-          reason = 'Muito mencionado na mídia'
-        } else if (positivityRatio > 0.7) {
-          reason = 'Alto sentimento positivo'
-        } else {
-          reason = 'Tema relevante'
-        }
+    const [recentRows, priorRows] = await Promise.all([
+      paginateRows<{ category: string | null }>(
+        () =>
+          supabase
+            .schema('noticias')
+            .from('news_topics')
+            .select('category')
+            .gte('extracted_at', recentSince),
+        { context: 'Recommendations.recent' },
+      ),
+      paginateRows<{ category: string | null }>(
+        () =>
+          supabase
+            .schema('noticias')
+            .from('news_topics')
+            .select('category')
+            .gte('extracted_at', priorSince)
+            .lt('extracted_at', recentSince),
+        { context: 'Recommendations.prior' },
+      ),
+    ])
+
+    if (recentRows.length === 0) return []
+
+    const countByCategory = (rows: Array<{ category: string | null }>) => {
+      const map = new Map<string, number>()
+      for (const r of rows) {
+        const cat = (r.category || 'outros').toLowerCase().trim()
+        map.set(cat, (map.get(cat) ?? 0) + 1)
+      }
+      return map
+    }
+
+    const recent = countByCategory(recentRows)
+    const prior = countByCategory(priorRows)
+
+    const recommendations = [...recent.entries()]
+      .map(([cat, recentCount]) => {
+        const priorCount = prior.get(cat) ?? 0
+        const growth = recentCount - priorCount
+        const ratio = priorCount > 0 ? recentCount / priorCount : recentCount
+        const reason =
+          priorCount === 0
+            ? 'Tema novo — surgiu nos últimos 7 dias'
+            : ratio >= 2
+              ? `Volume ${ratio.toFixed(1)}x maior que na semana anterior`
+              : growth > 0
+                ? `Crescimento de ${growth} menções em 7 dias`
+                : 'Tema com volume relevante'
 
         return {
-          theme: t.theme_name,
-          opportunity_score: t.mention_count * positivityRatio,
+          theme: capitalize(cat),
+          opportunity_score: recentCount,
           reason,
-          sentiment: positivityRatio > 0.6 ? 'positive' : positivityRatio > 0.4 ? 'neutral' : 'negative',
+          _growth: growth,
         }
       })
-      .sort((a, b) => b.opportunity_score - a.opportunity_score)
+      .sort((a, b) => b._growth - a._growth || b.opportunity_score - a.opportunity_score)
       .slice(0, limit)
+      .map(({ _growth, ...rest }) => rest)
 
     return recommendations
   } catch (error) {
@@ -314,7 +280,6 @@ export async function getCampaignRecommendations(
 export async function getStrategistKPIs(supabase: AppSupabaseClient, daysBack = 7): Promise<{
   total_unique_themes: number
   global_crises: number
-  sentiment_trend: 'improving' | 'worsening' | 'stable'
   media_coverage_trend: 'up' | 'down' | 'stable'
 }> {
   try {
@@ -343,7 +308,6 @@ export async function getStrategistKPIs(supabase: AppSupabaseClient, daysBack = 
     return {
       total_unique_themes: uniqueThemes.size,
       global_crises: globalCrisesCount ?? 0,
-      sentiment_trend: 'stable',
       media_coverage_trend: 'stable',
     }
   } catch (error) {
@@ -351,7 +315,6 @@ export async function getStrategistKPIs(supabase: AppSupabaseClient, daysBack = 
     return {
       total_unique_themes: 0,
       global_crises: 0,
-      sentiment_trend: 'stable',
       media_coverage_trend: 'stable',
     }
   }

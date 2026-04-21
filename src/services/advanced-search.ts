@@ -18,9 +18,6 @@ export interface AdvancedSearchFilters {
   themes?: string[]
   topicNames?: string[]
 
-  // Filtro por sentimento
-  sentiment?: 'positive' | 'neutral' | 'negative'
-
   // Filtro por categoria
   categories?: string[]
 
@@ -52,7 +49,6 @@ export interface SearchResult {
   news_topics?: {
     topics: Array<{ name: string; confidence: number; category?: string }> | null
     entities: Array<{ name: string; type: string }> | null
-    sentiment: string | null
     category: string | null
   }
 }
@@ -77,14 +73,14 @@ export interface AdvancedSearchResponse {
  * Design 3: Interface simples para 95% dos casos, com trade-offs documentados
  *
  * @param supabase - Cliente Supabase
- * @param filters - Filtros de busca (período, texto, cliente, sentimento, etc)
+ * @param filters - Filtros de busca (período, texto, cliente, categoria, etc)
  * @param userId - ID do usuário autenticado
  * @returns Notícias + contagens precisas + hint de paginação
  *
  * @example
  * const { data, totalCount, filteredCount, hasMore } = await advancedSearch(
  *   supabase,
- *   { query: 'inflação', clientIds: ['cli_123'], sentiment: 'negative' },
+ *   { query: 'inflação', clientIds: ['cli_123'], categories: ['economia'] },
  *   userId
  * )
  */
@@ -101,7 +97,6 @@ export async function advancedSearch(
       clientIds,
       themes,
       topicNames,
-      sentiment,
       categories,
       sourceIds,
       page = 1,
@@ -214,11 +209,6 @@ export async function advancedSearch(
 
       // Manter apenas notícias que mencionam algum dos tópicos
       filtered = filtered.filter((n) => allTopicNewsIds.has(n.id))
-    }
-
-    // Filtro por sentimento
-    if (sentiment) {
-      filtered = filtered.filter((n) => n.news_topics?.sentiment === sentiment)
     }
 
     // ====================================================================

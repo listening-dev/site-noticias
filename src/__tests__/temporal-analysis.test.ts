@@ -4,25 +4,20 @@
  * Tests for:
  * - getTemporalDistribution: Daily stats aggregation
  * - getThemeTimeline: Theme mention tracking over time
- * - getSentimentTrend: Sentiment distribution by day
  * - detectSpikes: Spike detection with configurable threshold
  *
  * Key Test Scenarios:
  * 1. Normal case: Multiple days with varied data
  * 2. Edge cases: Empty data, single day, single news item
- * 3. Data quality: Missing fields, invalid dates, malformed JSON
- * 4. Spike detection: Threshold validation, boundary conditions
+ * 3. Spike detection: Threshold validation, boundary conditions
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   getTemporalDistribution,
   getThemeTimeline,
-  getSentimentTrend,
   detectSpikes,
   DailyStats,
-  ThemeTimeline,
-  SentimentTrend,
 } from '@/services/temporal-analysis'
 
 /**
@@ -53,15 +48,6 @@ const FIXTURE_NEWS_MULTIPLE_DAYS = [
     id: 'news-6',
     published_at: '2026-04-16T11:20:00Z',
   },
-]
-
-const FIXTURE_TOPICS_MULTIPLE_DAYS = [
-  { news_id: 'news-1', sentiment: 'positive', extracted_at: '2026-04-14T10:05:00Z' },
-  { news_id: 'news-2', sentiment: 'neutral', extracted_at: '2026-04-14T14:35:00Z' },
-  { news_id: 'news-3', sentiment: 'negative', extracted_at: '2026-04-14T18:05:00Z' },
-  { news_id: 'news-4', sentiment: 'positive', extracted_at: '2026-04-15T09:05:00Z' },
-  { news_id: 'news-5', sentiment: 'positive', extracted_at: '2026-04-15T15:50:00Z' },
-  { news_id: 'news-6', sentiment: 'negative', extracted_at: '2026-04-16T11:25:00Z' },
 ]
 
 const FIXTURE_TOPICS_WITH_THEMES = [
@@ -98,38 +84,10 @@ const FIXTURE_TOPICS_WITH_THEMES = [
  */
 describe('detectSpikes (pure function)', () => {
   const DAILY_STATS: DailyStats[] = [
-    {
-      date: '2026-04-14',
-      total_news: 10,
-      positive_sentiment: 3,
-      neutral_sentiment: 4,
-      negative_sentiment: 3,
-      themes_mentioned: 5,
-    },
-    {
-      date: '2026-04-15',
-      total_news: 25, // 2.5x average
-      positive_sentiment: 10,
-      neutral_sentiment: 10,
-      negative_sentiment: 5,
-      themes_mentioned: 12,
-    },
-    {
-      date: '2026-04-16',
-      total_news: 12,
-      positive_sentiment: 5,
-      neutral_sentiment: 4,
-      negative_sentiment: 3,
-      themes_mentioned: 6,
-    },
-    {
-      date: '2026-04-17',
-      total_news: 8,
-      positive_sentiment: 2,
-      neutral_sentiment: 3,
-      negative_sentiment: 3,
-      themes_mentioned: 4,
-    },
+    { date: '2026-04-14', total_news: 10, themes_mentioned: 5 },
+    { date: '2026-04-15', total_news: 25, themes_mentioned: 12 }, // 2.5x average
+    { date: '2026-04-16', total_news: 12, themes_mentioned: 6 },
+    { date: '2026-04-17', total_news: 8, themes_mentioned: 4 },
   ]
 
   it('should detect spikes above threshold', async () => {
@@ -189,15 +147,11 @@ describe('detectSpikes (pure function)', () => {
 
 /**
  * Mocked DB Tests: Functions with Supabase dependency
- *
- * Note: In real testing, these would use PGLite or local Supabase emulator
- * For demonstration, we use mocked responses
  */
 describe('Temporal Analysis (with mocked Supabase)', () => {
   let mockSupabase: any
 
   beforeEach(() => {
-    // Mock Supabase client
     mockSupabase = {
       schema: vi.fn(() => mockSupabase),
       from: vi.fn(() => mockSupabase),
@@ -211,7 +165,6 @@ describe('Temporal Analysis (with mocked Supabase)', () => {
 
   describe('getTemporalDistribution', () => {
     it('should aggregate news by day', async () => {
-      // Mock responses
       mockSupabase.select.mockReturnValueOnce({
         gte: () => ({
           lte: () => ({
@@ -220,13 +173,6 @@ describe('Temporal Analysis (with mocked Supabase)', () => {
               error: null,
             }),
           }),
-        }),
-      })
-
-      mockSupabase.select.mockReturnValueOnce({
-        in: async () => ({
-          data: FIXTURE_TOPICS_MULTIPLE_DAYS,
-          error: null,
         }),
       })
 
@@ -239,9 +185,6 @@ describe('Temporal Analysis (with mocked Supabase)', () => {
       expect(result).toHaveLength(3) // 3 days
       expect(result[0].date).toBe('2026-04-14')
       expect(result[0].total_news).toBe(3)
-      expect(result[0].positive_sentiment).toBe(1)
-      expect(result[0].neutral_sentiment).toBe(1)
-      expect(result[0].negative_sentiment).toBe(1)
     })
 
     it('should return empty array when no news found', async () => {
@@ -263,38 +206,6 @@ describe('Temporal Analysis (with mocked Supabase)', () => {
       )
 
       expect(result).toEqual([])
-    })
-
-    it('should handle missing sentiment data gracefully', async () => {
-      mockSupabase.select.mockReturnValueOnce({
-        gte: () => ({
-          lte: () => ({
-            order: async () => ({
-              data: FIXTURE_NEWS_MULTIPLE_DAYS,
-              error: null,
-            }),
-          }),
-        }),
-      })
-
-      // Return topics without sentiment
-      mockSupabase.select.mockReturnValueOnce({
-        in: async () => ({
-          data: FIXTURE_TOPICS_MULTIPLE_DAYS.map((t) => ({ ...t, sentiment: null })),
-          error: null,
-        }),
-      })
-
-      const result = await getTemporalDistribution(
-        mockSupabase,
-        '2026-04-14T00:00:00Z',
-        '2026-04-16T23:59:59Z'
-      )
-
-      expect(result).toHaveLength(3)
-      expect(result[0].positive_sentiment).toBe(0)
-      expect(result[0].neutral_sentiment).toBe(0)
-      expect(result[0].negative_sentiment).toBe(0)
     })
   })
 
@@ -389,88 +300,6 @@ describe('Temporal Analysis (with mocked Supabase)', () => {
       expect(result_lower.length).toBe(result_upper.length)
     })
   })
-
-  describe('getSentimentTrend', () => {
-    it('should aggregate sentiment by day', async () => {
-      mockSupabase.select.mockReturnValueOnce({
-        gte: () => ({
-          lte: async () => ({
-            data: FIXTURE_NEWS_MULTIPLE_DAYS,
-            error: null,
-          }),
-        }),
-      })
-
-      mockSupabase.select.mockReturnValueOnce({
-        in: async () => ({
-          data: FIXTURE_TOPICS_MULTIPLE_DAYS,
-          error: null,
-        }),
-      })
-
-      const result = await getSentimentTrend(
-        mockSupabase,
-        '2026-04-14T00:00:00Z',
-        '2026-04-16T23:59:59Z'
-      )
-
-      expect(result).toHaveLength(3) // 3 days
-      expect(result[0].date).toBe('2026-04-14')
-      expect(result[0].positive).toBe(1)
-      expect(result[0].neutral).toBe(1)
-      expect(result[0].negative).toBe(1)
-    })
-
-    it('should return empty array when no news', async () => {
-      mockSupabase.select.mockReturnValueOnce({
-        gte: () => ({
-          lte: async () => ({
-            data: [],
-            error: null,
-          }),
-        }),
-      })
-
-      const result = await getSentimentTrend(
-        mockSupabase,
-        '2026-04-14T00:00:00Z',
-        '2026-04-16T23:59:59Z'
-      )
-
-      expect(result).toEqual([])
-    })
-
-    it('should handle missing sentiment values', async () => {
-      mockSupabase.select.mockReturnValueOnce({
-        gte: () => ({
-          lte: async () => ({
-            data: FIXTURE_NEWS_MULTIPLE_DAYS.slice(0, 1),
-            error: null,
-          }),
-        }),
-      })
-
-      mockSupabase.select.mockReturnValueOnce({
-        in: async () => ({
-          data: [
-            { news_id: 'news-1', sentiment: null, extracted_at: '2026-04-14T10:05:00Z' },
-          ],
-          error: null,
-        }),
-      })
-
-      const result = await getSentimentTrend(
-        mockSupabase,
-        '2026-04-14T00:00:00Z',
-        '2026-04-16T23:59:59Z'
-      )
-
-      expect(result).toHaveLength(1)
-      expect(result[0].positive).toBe(0)
-      expect(result[0].neutral).toBe(0)
-      expect(result[0].negative).toBe(0)
-    })
-  })
 })
 
 /**
@@ -491,7 +320,6 @@ describe('Date Handling', () => {
   })
 
   it('should handle timezone-aware dates', () => {
-    // Date with offset should still work
     const dateWithOffset = '2026-04-14T14:30:00-03:00'
     const normalized = new Date(dateWithOffset).toISOString().split('T')[0]
 

@@ -88,7 +88,6 @@ export async function processNewsTopicV2(
           news_id: newsId,
           topics: extracted.topics,
           entities: extracted.entities,
-          sentiment: extracted.sentiment,
           category: extracted.category,
         },
         { onConflict: 'news_id' }

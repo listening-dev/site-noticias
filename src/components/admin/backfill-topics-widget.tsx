@@ -65,7 +65,7 @@ export function BackfillTopicsWidget({ initialTotal, initialProcessed }: Props) 
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Brain size={18} />
-          Backfill de análise de sentimento (OpenAI)
+          Backfill de extração de tópicos (OpenAI)
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">

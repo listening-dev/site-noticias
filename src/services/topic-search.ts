@@ -30,7 +30,6 @@ export interface SearchResult {
   news_topics?: {
     topics: Array<{ name: string; confidence: number; category?: string }> | null
     entities: Array<{ name: string; type: string }> | null
-    sentiment: string | null
     category: string | null
   }
 }
@@ -123,25 +122,14 @@ export async function searchByTopicOptimized(
 }
 
 /**
- * Get topic statistics (mention count, sentiment breakdown).
+ * Get topic statistics (mention count, avg confidence).
  * Uses denormalized table for fast aggregation.
  *
  * @param supabase - Supabase client
  * @param topicName - Topic name
  * @param dateFrom - Optional start date (default: 7 days ago)
  * @param dateTo - Optional end date (default: now)
- * @returns Object with mention count and sentiment breakdown
- *
- * @example
- * const stats = await getTopicStats(supabase, 'inflação')
- * console.log(stats)
- * // {
- * //   mention_count: 45,
- * //   positive: 5,
- * //   neutral: 30,
- * //   negative: 10,
- * //   avg_confidence: 0.87
- * // }
+ * @returns Object with mention count and avg confidence
  */
 export async function getTopicStats(
   supabase: AppSupabaseClient,
@@ -150,75 +138,39 @@ export async function getTopicStats(
   dateTo?: string
 ): Promise<{
   mention_count: number
-  positive: number
-  neutral: number
-  negative: number
   avg_confidence: number
 }> {
   try {
     const to = dateTo ? new Date(dateTo) : new Date()
     const from = dateFrom ? new Date(dateFrom) : new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000)
 
-    // Query with aggregation
     const { data, error } = await supabase
       .schema('noticias')
       .from('topic_mentions')
-      .select(
-        'sentiment, confidence',
-        { count: 'exact' }
-      )
+      .select('confidence', { count: 'exact' })
       .eq('topic_name', topicName)
       .gte('mentioned_at', from.toISOString())
       .lte('mentioned_at', to.toISOString())
 
     if (error) {
       console.error('[TopicStats] Error:', error)
-      return {
-        mention_count: 0,
-        positive: 0,
-        neutral: 0,
-        negative: 0,
-        avg_confidence: 0,
-      }
+      return { mention_count: 0, avg_confidence: 0 }
     }
 
     if (!data || data.length === 0) {
-      return {
-        mention_count: 0,
-        positive: 0,
-        neutral: 0,
-        negative: 0,
-        avg_confidence: 0,
-      }
+      return { mention_count: 0, avg_confidence: 0 }
     }
-
-    const sentiments = data.reduce(
-      (acc, row) => {
-        if (row.sentiment === 'positive') acc.positive++
-        else if (row.sentiment === 'neutral') acc.neutral++
-        else if (row.sentiment === 'negative') acc.negative++
-        return acc
-      },
-      { positive: 0, neutral: 0, negative: 0 }
-    )
 
     const avgConfidence =
       data.reduce((sum, row) => sum + (row.confidence || 0.5), 0) / data.length
 
     return {
       mention_count: data.length,
-      ...sentiments,
       avg_confidence: Math.round(avgConfidence * 100) / 100,
     }
   } catch (error) {
     console.error('[TopicStats] Error:', error)
-    return {
-      mention_count: 0,
-      positive: 0,
-      neutral: 0,
-      negative: 0,
-      avg_confidence: 0,
-    }
+    return { mention_count: 0, avg_confidence: 0 }
   }
 }
 
@@ -243,23 +195,18 @@ export async function getTrendingTopics(
   Array<{
     topic_name: string
     mention_count: number
-    sentiment_distribution: {
-      positive: number
-      neutral: number
-      negative: number
-    }
   }>
 > {
   try {
     const sinceDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
     const { paginateRows } = await import('@/lib/supabase/paginate')
-    const raw = await paginateRows<{ topic_name: string; sentiment: string | null }>(
+    const raw = await paginateRows<{ topic_name: string }>(
       () =>
         supabase
           .schema('noticias')
           .from('topic_mentions')
-          .select('topic_name, sentiment')
+          .select('topic_name')
           .gte('mentioned_at', sinceDate),
       { context: 'TrendingTopics' },
     )
@@ -268,44 +215,14 @@ export async function getTrendingTopics(
       return []
     }
 
-    // Aggregate in memory
-    const topicMap = new Map<
-      string,
-      {
-        mention_count: number
-        positive: number
-        neutral: number
-        negative: number
-      }
-    >()
-
+    const topicMap = new Map<string, number>()
     for (const row of raw) {
-      const existing = topicMap.get(row.topic_name) || {
-        mention_count: 0,
-        positive: 0,
-        neutral: 0,
-        negative: 0,
-      }
-
-      existing.mention_count++
-      if (row.sentiment === 'positive') existing.positive++
-      else if (row.sentiment === 'neutral') existing.neutral++
-      else if (row.sentiment === 'negative') existing.negative++
-
-      topicMap.set(row.topic_name, existing)
+      if (!row.topic_name) continue
+      topicMap.set(row.topic_name, (topicMap.get(row.topic_name) ?? 0) + 1)
     }
 
-    // Convert to array and sort by mention count
     return Array.from(topicMap.entries())
-      .map(([topic_name, stats]) => ({
-        topic_name,
-        mention_count: stats.mention_count,
-        sentiment_distribution: {
-          positive: stats.positive,
-          neutral: stats.neutral,
-          negative: stats.negative,
-        },
-      }))
+      .map(([topic_name, mention_count]) => ({ topic_name, mention_count }))
       .sort((a, b) => b.mention_count - a.mention_count)
       .slice(0, limit)
   } catch (error) {

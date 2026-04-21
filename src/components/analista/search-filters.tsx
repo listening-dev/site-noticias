@@ -12,7 +12,6 @@ export interface SearchFiltersState {
   query: string
   dateFrom: string  // ISO 8601 with time: "2026-04-10T14:30:00"
   dateTo: string    // ISO 8601 with time: "2026-04-15T18:45:00"
-  sentiment: '' | 'positive' | 'neutral' | 'negative'
   categories: string[]
   topics: string[]
   sortBy: 'recent' | 'trending' | 'relevance'
@@ -22,12 +21,6 @@ interface SearchFiltersProps {
   onFilterChange: (filters: SearchFiltersState) => void
   isLoading?: boolean
 }
-
-const SENTIMENT_OPTIONS = [
-  { value: 'positive', label: '😊 Positivo', color: 'bg-green-100 text-green-800' },
-  { value: 'neutral', label: '😐 Neutro', color: 'bg-gray-100 text-gray-800' },
-  { value: 'negative', label: '😞 Negativo', color: 'bg-red-100 text-red-800' },
-]
 
 const SORT_OPTIONS = [
   { value: 'recent', label: 'Mais Recentes' },
@@ -47,7 +40,6 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
     query: '',
     dateFrom: toLocalDatetimeString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
     dateTo: toLocalDatetimeString(new Date()),
-    sentiment: '',
     categories: [],
     topics: [],
     sortBy: 'recent',
@@ -189,31 +181,6 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
               <p className="text-xs text-gray-500 mt-1">Hora local será preservada na busca</p>
             </div>
 
-            {/* Sentiment */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Sentimento</label>
-              <div className="flex flex-wrap gap-2">
-                {SENTIMENT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() =>
-                      handleFilterChange({
-                        sentiment: filters.sentiment === opt.value ? '' : (opt.value as any),
-                      })
-                    }
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      filters.sentiment === opt.value
-                        ? opt.color
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                    disabled={isLoading}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Categories */}
             <div>
               <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -297,13 +264,12 @@ export function SearchFilters({ onFilterChange, isLoading }: SearchFiltersProps)
             </div>
 
             {/* Reset Button */}
-            {(filters.categories.length > 0 || filters.topics.length > 0 || filters.sentiment) && (
+            {(filters.categories.length > 0 || filters.topics.length > 0) && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() =>
                   handleFilterChange({
-                    sentiment: '',
                     categories: [],
                     topics: [],
                   })

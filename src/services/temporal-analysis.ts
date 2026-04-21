@@ -6,9 +6,6 @@ type AppSupabaseClient = SupabaseClient<Database>
 export interface DailyStats {
   date: string
   total_news: number
-  positive_sentiment: number
-  neutral_sentiment: number
-  negative_sentiment: number
   themes_mentioned: number
 }
 
@@ -17,11 +14,14 @@ export interface ThemeTimeline {
   [themeName: string]: number | string
 }
 
-export interface SentimentTrend {
-  date: string
-  positive: number
-  neutral: number
-  negative: number
+export interface CategoryVolume {
+  category: string
+  count: number
+}
+
+export interface TopThemeInPeriod {
+  topic_name: string
+  mention_count: number
 }
 
 /**
@@ -45,52 +45,18 @@ export async function getTemporalDistribution(
       return []
     }
 
-    // Agrupar por data
-    const grouped = new Map<string, { news: string[]; sentiments: string[] }>()
-
-    const { data: topicsData } = await supabase
-      .schema('noticias')
-      .from('news_topics')
-      .select('news_id, sentiment')
-      .in(
-        'news_id',
-        newsData.map((n) => n.id)
-      )
-
+    const grouped = new Map<string, number>()
     for (const news of newsData) {
       const date = new Date(news.published_at || news.id).toISOString().split('T')[0]
-
-      if (!grouped.has(date)) {
-        grouped.set(date, { news: [], sentiments: [] })
-      }
-
-      const entry = grouped.get(date)!
-      entry.news.push(news.id)
+      grouped.set(date, (grouped.get(date) ?? 0) + 1)
     }
 
-    // Adicionar sentimentos
-    if (topicsData) {
-      for (const topic of topicsData) {
-        for (const [date, data] of grouped.entries()) {
-          if (data.news.includes(topic.news_id)) {
-            if (topic.sentiment) {
-              data.sentiments.push(topic.sentiment)
-            }
-          }
-        }
-      }
-    }
-
-    // Converter para formato de gráfico
     const result: DailyStats[] = []
-    for (const [date, data] of grouped.entries()) {
+    for (const [date, count] of grouped.entries()) {
       result.push({
         date,
-        total_news: data.news.length,
-        positive_sentiment: data.sentiments.filter((s) => s === 'positive').length,
-        neutral_sentiment: data.sentiments.filter((s) => s === 'neutral').length,
-        negative_sentiment: data.sentiments.filter((s) => s === 'negative').length,
-        themes_mentioned: data.news.length, // Simplificado
+        total_news: count,
+        themes_mentioned: count, // Simplificado
       })
     }
 
@@ -166,67 +132,81 @@ export async function getThemeTimeline(
 }
 
 /**
- * Analisa tendência de sentimento ao longo do tempo
+ * Volume de notícias por categoria no período.
  */
-export async function getSentimentTrend(
+export async function getCategoryDistribution(
   supabase: AppSupabaseClient,
   dateFrom: string,
-  dateTo: string
-): Promise<SentimentTrend[]> {
+  dateTo: string,
+  limit = 10
+): Promise<CategoryVolume[]> {
   try {
-    const { data: newsData } = await supabase
-      .schema('noticias')
-      .from('news')
-      .select('id, published_at')
-      .gte('published_at', dateFrom)
-      .lte('published_at', dateTo)
+    const { paginateRows } = await import('@/lib/supabase/paginate')
+    const rows = await paginateRows<{ category: string | null }>(
+      () =>
+        supabase
+          .schema('noticias')
+          .from('news_topics')
+          .select('category')
+          .gte('extracted_at', dateFrom)
+          .lte('extracted_at', dateTo),
+      { context: 'CategoryDistribution' },
+    )
 
-    if (!newsData || newsData.length === 0) {
-      return []
+    if (rows.length === 0) return []
+
+    const map = new Map<string, number>()
+    for (const r of rows) {
+      const cat = (r.category || 'outros').toLowerCase().trim()
+      map.set(cat, (map.get(cat) ?? 0) + 1)
     }
 
-    const { data: topicsData } = await supabase
-      .schema('noticias')
-      .from('news_topics')
-      .select('news_id, sentiment, extracted_at')
-      .in(
-        'news_id',
-        newsData.map((n) => n.id)
-      )
-
-    // Agrupar por data e sentimento
-    const grouped = new Map<
-      string,
-      { positive: number; neutral: number; negative: number }
-    >()
-
-    if (topicsData) {
-      for (const topic of topicsData) {
-        const date = new Date(topic.extracted_at).toISOString().split('T')[0]
-
-        if (!grouped.has(date)) {
-          grouped.set(date, { positive: 0, neutral: 0, negative: 0 })
-        }
-
-        const entry = grouped.get(date)!
-        if (topic.sentiment === 'positive') entry.positive++
-        else if (topic.sentiment === 'neutral') entry.neutral++
-        else if (topic.sentiment === 'negative') entry.negative++
-      }
-    }
-
-    // Converter para formato de gráfico
-    const result: SentimentTrend[] = []
-    for (const [date, data] of grouped.entries()) {
-      result.push({
-        date,
-        ...data,
-      })
-    }
-
-    return result.sort((a, b) => a.date.localeCompare(b.date))
+    return [...map.entries()]
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit)
   } catch (error) {
-    console.error('[TemporalAnalysis] Erro ao buscar tendência de sentimento:', error)
+    console.error('[TemporalAnalysis] Erro ao buscar distribuição por categoria:', error)
+    return []
+  }
+}
+
+/**
+ * Tópicos mais mencionados no período, via tabela denormalizada topic_mentions.
+ */
+export async function getTopThemesInPeriod(
+  supabase: AppSupabaseClient,
+  dateFrom: string,
+  dateTo: string,
+  limit = 10
+): Promise<TopThemeInPeriod[]> {
+  try {
+    const { paginateRows } = await import('@/lib/supabase/paginate')
+    const rows = await paginateRows<{ topic_name: string }>(
+      () =>
+        supabase
+          .schema('noticias')
+          .from('topic_mentions')
+          .select('topic_name')
+          .gte('mentioned_at', dateFrom)
+          .lte('mentioned_at', dateTo),
+      { context: 'TopThemesInPeriod' },
+    )
+
+    if (rows.length === 0) return []
+
+    const map = new Map<string, number>()
+    for (const r of rows) {
+      if (!r.topic_name) continue
+      map.set(r.topic_name, (map.get(r.topic_name) ?? 0) + 1)
+    }
+
+    return [...map.entries()]
+      .map(([topic_name, mention_count]) => ({ topic_name, mention_count }))
+      .sort((a, b) => b.mention_count - a.mention_count)
+      .slice(0, limit)
+  } catch (error) {
+    console.error('[TemporalAnalysis] Erro ao buscar top temas:', error)
     return []
   }
 }

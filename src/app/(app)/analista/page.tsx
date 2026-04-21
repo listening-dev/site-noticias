@@ -11,7 +11,14 @@ import { ComparisonView } from '@/components/analista/comparison-view'
 import { createClient } from '@/lib/supabase/client'
 import { advancedSearch } from '@/services/advanced-search'
 import { SearchResult } from '@/services/advanced-search'
-import { getTemporalDistribution, getSentimentTrend } from '@/services/temporal-analysis'
+import {
+  CategoryVolume,
+  DailyStats,
+  TopThemeInPeriod,
+  getCategoryDistribution,
+  getTemporalDistribution,
+  getTopThemesInPeriod,
+} from '@/services/temporal-analysis'
 
 export default function AnalistaPage() {
   const [activeTab, setActiveTab] = useState<'search' | 'analysis' | 'comparison'>('search')
@@ -163,7 +170,6 @@ function SearchTab() {
             query: filters.query || undefined,
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
-            sentiment: filters.sentiment || undefined,
             categories: filters.categories.length > 0 ? filters.categories : undefined,
             topicNames: filters.topics.length > 0 ? filters.topics : undefined,
             sortBy: filters.sortBy,
@@ -343,26 +349,6 @@ function SearchResultCard({ news }: { news: SearchResult }) {
             </div>
           )}
 
-          {/* Sentimento */}
-          {news.news_topics?.sentiment && (
-            <div className="mt-2">
-              <span
-                className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${
-                  news.news_topics.sentiment === 'positive'
-                    ? 'bg-green-100 text-green-800'
-                    : news.news_topics.sentiment === 'negative'
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-gray-100 text-gray-800'
-                }`}
-              >
-                {news.news_topics.sentiment === 'positive'
-                  ? '😊 Positivo'
-                  : news.news_topics.sentiment === 'negative'
-                    ? '😞 Negativo'
-                    : '😐 Neutro'}
-              </span>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -381,24 +367,26 @@ function AnalysisTab() {
   )
   const [dateTo, setDateTo] = useState(toLocalDatetimeForInput(new Date()))
   const [loading, setLoading] = useState(false)
-  const [dailyStats, setDailyStats] = useState<any[]>([])
-  const [sentimentTrend, setSentimentTrend] = useState<any[]>([])
+  const [dailyStats, setDailyStats] = useState<DailyStats[]>([])
+  const [categoryVolume, setCategoryVolume] = useState<CategoryVolume[]>([])
+  const [topThemes, setTopThemes] = useState<TopThemeInPeriod[]>([])
   const supabase = createClient()
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true)
-        // Converter datetime-local para ISO 8601
         const fromISO = new Date(`${dateFrom}:00`).toISOString()
         const toISO = new Date(`${dateTo}:00`).toISOString()
 
-        const [dailyData, sentimentData] = await Promise.all([
+        const [dailyData, categoryData, topThemesData] = await Promise.all([
           getTemporalDistribution(supabase, fromISO, toISO),
-          getSentimentTrend(supabase, fromISO, toISO),
+          getCategoryDistribution(supabase, fromISO, toISO),
+          getTopThemesInPeriod(supabase, fromISO, toISO),
         ])
         setDailyStats(dailyData)
-        setSentimentTrend(sentimentData)
+        setCategoryVolume(categoryData)
+        setTopThemes(topThemesData)
       } catch (error) {
         console.error('Erro ao carregar análise temporal:', error)
       } finally {
@@ -443,7 +431,8 @@ function AnalysisTab() {
       {/* Gráficos */}
       <TemporalCharts
         dailyStats={dailyStats}
-        sentimentTrend={sentimentTrend}
+        categoryVolume={categoryVolume}
+        topThemes={topThemes}
         loading={loading}
       />
     </div>

@@ -2,30 +2,32 @@
 
 import { useMemo } from 'react'
 import {
-  LineChart,
-  Line,
-  AreaChart,
   Area,
-  BarChart,
+  AreaChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
 } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { DailyStats, SentimentTrend } from '@/services/temporal-analysis'
+import { CategoryVolume, DailyStats, TopThemeInPeriod } from '@/services/temporal-analysis'
 
 interface TemporalChartsProps {
   dailyStats?: DailyStats[]
-  sentimentTrend?: SentimentTrend[]
+  categoryVolume?: CategoryVolume[]
+  topThemes?: TopThemeInPeriod[]
   loading?: boolean
 }
 
-export function TemporalCharts({ dailyStats = [], sentimentTrend = [], loading = false }: TemporalChartsProps) {
-  // Formatar datas para exibição
+export function TemporalCharts({
+  dailyStats = [],
+  categoryVolume = [],
+  topThemes = [],
+  loading = false,
+}: TemporalChartsProps) {
   const formattedDailyStats = useMemo(
     () =>
       dailyStats.map((d) => ({
@@ -38,21 +40,17 @@ export function TemporalCharts({ dailyStats = [], sentimentTrend = [], loading =
     [dailyStats]
   )
 
-  const formattedSentiment = useMemo(
+  const formattedCategory = useMemo(
     () =>
-      sentimentTrend.map((s) => ({
-        ...s,
-        date: new Date(s.date).toLocaleDateString('pt-BR', {
-          month: 'short',
-          day: 'numeric',
-        }),
+      categoryVolume.map((c) => ({
+        ...c,
+        category: capitalize(c.category),
       })),
-    [sentimentTrend]
+    [categoryVolume]
   )
 
   return (
     <div className="space-y-6">
-      {/* Volume de Notícias */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Volume de Notícias</CardTitle>
@@ -99,146 +97,108 @@ export function TemporalCharts({ dailyStats = [], sentimentTrend = [], loading =
         </CardContent>
       </Card>
 
-      {/* Sentimento ao Longo do Tempo */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Tendência de Sentimento</CardTitle>
-          <CardDescription>Evolução de sentimentos (positivo, neutro, negativo) ao longo do tempo</CardDescription>
+          <CardTitle className="text-lg">Volume por Categoria</CardTitle>
+          <CardDescription>Distribuição das notícias entre categorias no período</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading || formattedSentiment.length === 0 ? (
+          {loading || formattedCategory.length === 0 ? (
             <div className="bg-gray-50 rounded-lg p-8 text-center h-80 flex items-center justify-center">
               <p className="text-gray-500">
-                {loading ? 'Carregando gráfico...' : 'Sem dados de sentimento para o período'}
+                {loading ? 'Carregando gráfico...' : 'Sem dados de categoria para o período'}
               </p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={formattedSentiment} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <BarChart
+                data={formattedCategory}
+                layout="vertical"
+                margin={{ top: 10, right: 30, left: 20, bottom: 0 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: 12 }} />
-                <YAxis stroke="#6b7280" style={{ fontSize: 12 }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                  }}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="positive"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  name="Positivo"
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="neutral"
+                <XAxis type="number" stroke="#6b7280" style={{ fontSize: 12 }} />
+                <YAxis
+                  type="category"
+                  dataKey="category"
                   stroke="#6b7280"
-                  strokeWidth={2}
-                  name="Neutro"
-                  dot={false}
+                  style={{ fontSize: 12 }}
+                  width={120}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="negative"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  name="Negativo"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Distribuição de Sentimento por Dia */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Distribuição por Dia</CardTitle>
-          <CardDescription>Quantidade de notícias por sentimento em cada dia</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading || formattedDailyStats.length === 0 ? (
-            <div className="bg-gray-50 rounded-lg p-8 text-center h-80 flex items-center justify-center">
-              <p className="text-gray-500">
-                {loading ? 'Carregando gráfico...' : 'Sem dados para o período selecionado'}
-              </p>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={formattedDailyStats} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: 12 }} />
-                <YAxis stroke="#6b7280" style={{ fontSize: 12 }} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: '#fff',
                     border: '1px solid #e5e7eb',
                     borderRadius: '8px',
                   }}
+                  formatter={(value) => [value, 'Notícias']}
                 />
-                <Legend />
-                <Bar dataKey="positive_sentiment" stackId="sentiment" fill="#10b981" name="Positivo" />
-                <Bar dataKey="neutral_sentiment" stackId="sentiment" fill="#6b7280" name="Neutro" />
-                <Bar dataKey="negative_sentiment" stackId="sentiment" fill="#ef4444" name="Negativo" />
+                <Bar dataKey="count" fill="#3b82f6" name="Notícias" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
         </CardContent>
       </Card>
 
-      {/* Estatísticas Resumidas */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Top Temas do Período</CardTitle>
+          <CardDescription>Tópicos mais mencionados nas notícias do período</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading || topThemes.length === 0 ? (
+            <div className="bg-gray-50 rounded-lg p-8 text-center">
+              <p className="text-gray-500">
+                {loading ? 'Carregando...' : 'Sem temas extraídos no período'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {topThemes.map((t, idx) => (
+                <div key={t.topic_name} className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-gray-400 w-6 text-right">#{idx + 1}</span>
+                  <span className="flex-1 text-sm text-gray-900 truncate">{t.topic_name}</span>
+                  <span className="text-sm font-semibold text-blue-600">
+                    {t.mention_count} {t.mention_count === 1 ? 'menção' : 'menções'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {(() => {
         const totalNews = formattedDailyStats.reduce((sum, d) => sum + d.total_news, 0)
-        const pos = formattedDailyStats.reduce((sum, d) => sum + d.positive_sentiment, 0)
-        const neu = formattedDailyStats.reduce((sum, d) => sum + (d.neutral_sentiment ?? 0), 0)
-        const neg = formattedDailyStats.reduce((sum, d) => sum + d.negative_sentiment, 0)
-        const analisadas = pos + neu + neg
         const mediaDia = formattedDailyStats.length > 0
           ? Math.round(totalNews / formattedDailyStats.length)
           : 0
-        const coberturaPct = totalNews > 0 ? Math.round((analisadas / totalNews) * 100) : 0
+        const dominantCategory = formattedCategory[0]?.category ?? '—'
+        const topTheme = topThemes[0]?.topic_name ?? '—'
 
         return (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <StatBox label="Total de Notícias" value={totalNews} color="bg-blue-50 text-blue-700" />
-              <StatBox label="Média por Dia" value={mediaDia} color="bg-purple-50 text-purple-700" />
-              <StatBox
-                label="Positivo"
-                value={pos}
-                subtitle={analisadas > 0 ? `de ${analisadas} analisadas` : 'sem análise ainda'}
-                color="bg-green-50 text-green-700"
-              />
-              <StatBox
-                label="Negativo"
-                value={neg}
-                subtitle={analisadas > 0 ? `de ${analisadas} analisadas` : 'sem análise ainda'}
-                color="bg-red-50 text-red-700"
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Cobertura de análise de sentimento: <span className="font-semibold">{analisadas}/{totalNews} notícias ({coberturaPct}%)</span>.
-              {coberturaPct < 80 && ' A análise é aplicada gradualmente pelo pipeline de NLP — notícias antigas sem análise não entram nos totais de sentimento.'}
-            </p>
-          </>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <StatBox label="Total de Notícias" value={String(totalNews)} color="bg-blue-50 text-blue-700" />
+            <StatBox label="Média por Dia" value={String(mediaDia)} color="bg-purple-50 text-purple-700" />
+            <StatBox label="Categoria Dominante" value={dominantCategory} color="bg-emerald-50 text-emerald-700" />
+            <StatBox label="Tema Mais Citado" value={topTheme} color="bg-amber-50 text-amber-700" />
+          </div>
         )
       })()}
     </div>
   )
 }
 
-function StatBox({ label, value, subtitle, color }: { label: string; value: number; subtitle?: string; color: string }) {
+function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className={`rounded-lg p-4 ${color}`}>
       <p className="text-sm font-medium opacity-75">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
-      {subtitle && <p className="text-xs opacity-60 mt-1">{subtitle}</p>}
+      <p className="text-2xl font-bold mt-1 truncate" title={value}>{value}</p>
     </div>
   )
+}
+
+function capitalize(s: string): string {
+  if (!s) return s
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }

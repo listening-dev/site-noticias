@@ -194,8 +194,6 @@ export interface ExtractedTopics {
     type: 'PERSON' | 'ORG' | 'LOCATION' | 'OTHER'
   }>
 
-  sentiment: 'positive' | 'neutral' | 'negative'
-
   category: string
 }
 

@@ -9,7 +9,7 @@ export const maxDuration = 60
  * POST /api/admin/backfill-topics
  *
  * Processa em lote notícias que ainda não têm entrada em news_topics,
- * rodando a extração OpenAI pra preencher sentimento/tópicos/categoria.
+ * rodando a extração OpenAI pra preencher tópicos/categoria.
  *
  * Body (opcional):
  *   limit?: number  — máximo de notícias por chamada (default 100, max 300)

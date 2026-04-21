@@ -200,58 +200,13 @@ function ruleBasedExtraction(content: string): ExtractedTopics {
     primaryCategory = Array.from(categoryCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 'outros'
   }
 
-  // Simple sentiment analysis
-  const sentiment = extractSentimentFromRules(content)
-
   // Extract entities (basic: proper nouns)
   const entities = extractEntitiesFromRules(content)
 
   return {
     topics: topics.slice(0, 5), // Max 5 topics
     entities,
-    sentiment,
     category: primaryCategory,
-  }
-}
-
-/**
- * Simple rule-based sentiment analysis
- * Note: This is basic - proper sentiment analysis requires more sophisticated NLP
- */
-function extractSentimentFromRules(content: string): 'positive' | 'neutral' | 'negative' {
-  const lowerContent = content.toLowerCase()
-
-  // Positive indicators
-  const positivePatterns = [
-    /\b(crescimento|aumento|lucro|ganho|vitória|sucesso|progresso|melhoria|otim|recoverage|recuperação|boa|excelente|incrível|fantástico)\b/g,
-    /\b(inovação|novo|criação|criativo|tendência|potencial)\b/g,
-  ]
-
-  // Negative indicators
-  const negativePatterns = [
-    /\b(queda|redução|perda|crise|problema|dificuldade|fracasso|morte|acidente|desastre|pior|ruim|péssimo|horrível)\b/g,
-    /\b(alerta|aviso|risco|ameaça|ameaçado|preocupante|preocupação|conflito|tensão|disputa)\b/g,
-  ]
-
-  let positiveScore = 0
-  let negativeScore = 0
-
-  for (const pattern of positivePatterns) {
-    const matches = lowerContent.match(pattern)
-    positiveScore += matches ? matches.length : 0
-  }
-
-  for (const pattern of negativePatterns) {
-    const matches = lowerContent.match(pattern)
-    negativeScore += matches ? matches.length : 0
-  }
-
-  if (positiveScore > negativeScore) {
-    return 'positive'
-  } else if (negativeScore > positiveScore) {
-    return 'negative'
-  } else {
-    return 'neutral'
   }
 }
 

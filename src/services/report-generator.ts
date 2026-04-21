@@ -11,7 +11,6 @@ export function generateCSV(results: SearchResult[], filename = 'relatorio.csv')
     'URL',
     'Data Publicação',
     'Categoria',
-    'Sentimento',
     'Tópicos Principais',
     'Entidades',
   ]
@@ -23,7 +22,6 @@ export function generateCSV(results: SearchResult[], filename = 'relatorio.csv')
     `"${r.url}"`,
     r.published_at ? new Date(r.published_at).toLocaleDateString('pt-BR') : '',
     r.category || '',
-    r.news_topics?.sentiment || 'N/A',
     r.news_topics?.topics
       ? `"${r.news_topics.topics
           .map((t) => `${t.name} (${(t.confidence * 100).toFixed(0)}%)`)
@@ -67,7 +65,6 @@ export function generateJSON(results: SearchResult[], filename = 'relatorio.json
       category: r.category,
       topics: r.news_topics?.topics || [],
       entities: r.news_topics?.entities || [],
-      sentiment: r.news_topics?.sentiment,
     })),
   }
 
@@ -198,21 +195,6 @@ export function generateHTML(
       color: #1e40af;
     }
 
-    .sentiment-positive {
-      background: #dcfce7;
-      color: #166534;
-    }
-
-    .sentiment-neutral {
-      background: #f3f4f6;
-      color: #374151;
-    }
-
-    .sentiment-negative {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
     .topics {
       margin-top: 12px;
     }
@@ -278,19 +260,6 @@ export function generateHTML(
             ${
               r.category
                 ? `<span class="badge badge-category">${escapeHtml(r.category)}</span>`
-                : ''
-            }
-            ${
-              r.news_topics?.sentiment
-                ? `<span class="badge sentiment-${r.news_topics.sentiment}">
-                    ${
-                      r.news_topics.sentiment === 'positive'
-                        ? '😊 Positivo'
-                        : r.news_topics.sentiment === 'negative'
-                          ? '😞 Negativo'
-                          : '😐 Neutro'
-                    }
-                  </span>`
                 : ''
             }
             ${

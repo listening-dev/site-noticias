@@ -20,15 +20,14 @@ export interface ExtractedTopics {
     name: string
     type: string
   }>
-  sentiment: 'positive' | 'neutral' | 'negative'
   category: string
 }
 
 /**
- * Extrai tópicos, entidades e sentimento de uma notícia usando OpenAI
+ * Extrai tópicos, entidades e categoria de uma notícia usando OpenAI
  * @param title - Título da notícia
  * @param description - Descrição/conteúdo da notícia
- * @returns Objeto com tópicos, entidades, sentimento e categoria
+ * @returns Objeto com tópicos, entidades e categoria
  */
 export async function extractTopicsFromNews(
   title: string,
@@ -46,7 +45,6 @@ export async function extractTopicsFromNews(
     return {
       topics: [],
       entities: [],
-      sentiment: 'neutral',
       category: 'outros',
     }
   }

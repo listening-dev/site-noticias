@@ -37,7 +37,6 @@ export interface ExtractedTopics {
     name: string
     type: string
   }>
-  sentiment: 'positive' | 'neutral' | 'negative'
   category: string
 }
 
@@ -73,20 +72,7 @@ export async function extractTopicsWithErrorTracking(
 
 1. Tópicos principais (máx 5, com confidence 0-1)
 2. Entidades mencionadas (pessoas, organizações, locais)
-3. Sentimento geral (positivo, neutro ou negativo)
-4. Categoria (economia, política, tecnologia, saúde, esportes, outros)
-
-INSTRUÇÃO ESPECIAL PARA SENTIMENTO:
-Analise o sentimento levando em conta:
-- Tom geral da notícia (otimista, alarmista, neutro)
-- Palavras-chave de impacto (crescimento, crise, inovação, etc)
-- Contexto econômico/social (se positivo ou negativo)
-- Citações diretas ou indiretas de stakeholders
-- Prognóstico ou perspectivas mencionadas
-- NÃO confunda notícia sobre assunto negativo (crime, desastre) com SENTIMENTO NEGATIVO
-  * Exemplo: "Empresa anuncia lucro recorde apesar de crises" = POSITIVO, não NEGATIVO
-  * Exemplo: "Economista alerta para riscos de recessão" = NEGATIVO
-  * Exemplo: "Método novo testado em laboratório" = NEUTRO
+3. Categoria (economia, política, tecnologia, saúde, esportes, outros)
 
 Notícia:
 ${content}
@@ -95,7 +81,6 @@ Responda em JSON (sem markdown) com exatamente esta estrutura:
 {
   "topics": [{"name": "string", "confidence": 0.0-1.0, "category": "string"}],
   "entities": [{"name": "string", "type": "PERSON|ORG|LOCATION|OTHER"}],
-  "sentiment": "positive|neutral|negative",
   "category": "string"
 }`
 
@@ -137,7 +122,6 @@ Responda em JSON (sem markdown) com exatamente esta estrutura:
       return {
         topics: extracted.topics || [],
         entities: extracted.entities || [],
-        sentiment: extracted.sentiment || 'neutral',
         category: extracted.category || 'outros',
       } as ExtractedTopics
     },

@@ -12,18 +12,12 @@ interface ComparisonViewProps {
   supabase: AppSupabaseClient
 }
 
-interface SentimentDist {
-  positive: number
-  neutral: number
-  negative: number
-}
-
 interface ClientStats {
   client_id: string
   client_name: string
   total_matches: number
   top_themes: Array<{ name: string; count: number }>
-  sentiment_distribution: SentimentDist
+  category_distribution: Array<{ category: string; count: number }>
 }
 
 export function ComparisonView({ supabase }: ComparisonViewProps) {
@@ -39,7 +33,6 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
         const { data: userData } = await supabase.auth.getUser()
         if (!userData.user) return
 
-        // Buscar clientes do usuário
         const { data: userClients } = await supabase
           .schema('noticias')
           .from('user_clients')
@@ -76,13 +69,13 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
       setLoading(true)
       try {
         const newStats: [ClientStats | null, ClientStats | null] = [null, null]
+        const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
         for (let i = 0; i < 2; i++) {
           if (!selectedClients[i]) continue
 
           const clientId = selectedClients[i]!
 
-          // Buscar nome do cliente
           const { data: clientData } = await supabase
             .schema('noticias')
             .from('clients')
@@ -90,31 +83,40 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
             .eq('id', clientId)
             .single()
 
-          // Buscar matches
           const { data: matches } = await supabase
             .schema('noticias')
-            .from('client_theme_matches')
-            .select('theme_id')
+            .from('client_news')
+            .select('news_id')
             .eq('client_id', clientId)
-            .gte('matched_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+            .gte('matched_at', sinceDate)
 
-          // Buscar sentimento das notícias
-          const { data: topics } = await supabase
-            .schema('noticias')
-            .from('news_topics')
-            .select('sentiment')
-            .gte('extracted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+          const newsIds = [...new Set((matches ?? []).map((m) => m.news_id))]
+
+          let categoryDistribution: Array<{ category: string; count: number }> = []
+          if (newsIds.length > 0) {
+            const { data: topics } = await supabase
+              .schema('noticias')
+              .from('news_topics')
+              .select('category')
+              .in('news_id', newsIds)
+
+            const map = new Map<string, number>()
+            for (const t of topics ?? []) {
+              const cat = (t.category || 'outros').toLowerCase().trim()
+              map.set(cat, (map.get(cat) ?? 0) + 1)
+            }
+            categoryDistribution = [...map.entries()]
+              .map(([category, count]) => ({ category, count }))
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 6)
+          }
 
           newStats[i] = {
             client_id: clientId,
             client_name: clientData?.name || 'Unknown',
             total_matches: matches?.length || 0,
-            top_themes: [], // Simplificado
-            sentiment_distribution: {
-              positive: topics?.filter((t) => t.sentiment === 'positive').length || 0,
-              neutral: topics?.filter((t) => t.sentiment === 'neutral').length || 0,
-              negative: topics?.filter((t) => t.sentiment === 'negative').length || 0,
-            },
+            top_themes: [],
+            category_distribution: categoryDistribution,
           }
         }
 
@@ -131,7 +133,6 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Seletores de Clientes */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[0, 1].map((idx) => (
           <Card key={idx}>
@@ -162,7 +163,6 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
         ))}
       </div>
 
-      {/* Comparação */}
       {selectedClients[0] || selectedClients[1] ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {[0, 1].map((idx) => (
@@ -175,7 +175,6 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
                 </Card>
               ) : stats[idx] ? (
                 <div className="space-y-4">
-                  {/* Header */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-lg">{stats[idx]?.client_name}</CardTitle>
@@ -183,7 +182,6 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
                     </CardHeader>
                   </Card>
 
-                  {/* KPIs */}
                   <Card>
                     <CardContent className="pt-6">
                       <div className="space-y-3">
@@ -197,48 +195,36 @@ export function ComparisonView({ supabase }: ComparisonViewProps) {
                     </CardContent>
                   </Card>
 
-                  {/* Sentimento */}
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Distribuição de Sentimento</CardTitle>
+                      <CardTitle className="text-sm">Distribuição por Categoria</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      {stats[idx] && Object.entries(stats[idx].sentiment_distribution).map(([sent, count]) => (
-                        <div key={sent}>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="capitalize">{sent}</span>
-                            <Badge variant="secondary">{count}</Badge>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className={`h-2 rounded-full ${
-                                sent === 'positive'
-                                  ? 'bg-green-500'
-                                  : sent === 'negative'
-                                    ? 'bg-red-500'
-                                    : 'bg-gray-500'
-                              }`}
-                              style={{
-                                width: `${
-                                  stats[idx]?.sentiment_distribution &&
-                                  stats[idx]!.sentiment_distribution[
-                                    sent as keyof SentimentDist
-                                  ]
-                                    ? (stats[idx]!.sentiment_distribution[
-                                        sent as keyof SentimentDist
-                                      ] /
-                                        Object.values(stats[idx]!.sentiment_distribution).reduce(
-                                          (a, b) => a + b,
-                                          1
-                                        )) *
-                                      100
-                                    : 0
-                                }%`
-                              }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                      {stats[idx]!.category_distribution.length === 0 ? (
+                        <p className="text-sm text-gray-500">Sem categorias no período</p>
+                      ) : (() => {
+                        const total = stats[idx]!.category_distribution.reduce(
+                          (a, b) => a + b.count,
+                          0
+                        )
+                        return stats[idx]!.category_distribution.map(({ category, count }) => {
+                          const pct = total > 0 ? (count / total) * 100 : 0
+                          return (
+                            <div key={category}>
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="capitalize">{category}</span>
+                                <Badge variant="secondary">{count}</Badge>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="h-2 rounded-full bg-blue-500"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          )
+                        })
+                      })()}
                     </CardContent>
                   </Card>
                 </div>

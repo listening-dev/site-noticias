@@ -1,10 +1,9 @@
-import { TrendingUp, Sparkles, Globe, Zap } from 'lucide-react'
+import { Sparkles, Globe, Zap } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase/server'
 import {
   getTopGlobalThemes,
-  getSentimentOverview,
   getGlobalCrises,
   getCampaignRecommendations,
   getStrategistKPIs,
@@ -13,10 +12,9 @@ import {
 export default async function EstrategistPage() {
   const supabase = await createClient()
 
-  const [kpis, topThemes, sentimentOverview, globalCrises, recommendations] = await Promise.all([
+  const [kpis, topThemes, globalCrises, recommendations] = await Promise.all([
     getStrategistKPIs(supabase),
     getTopGlobalThemes(supabase, 10, 7),
-    getSentimentOverview(supabase, 7),
     getGlobalCrises(supabase, 5),
     getCampaignRecommendations(supabase, 5),
   ])
@@ -30,7 +28,7 @@ export default async function EstrategistPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KPICard
           icon={<Globe className="h-5 w-5" />}
           label="Temas Únicos"
@@ -41,12 +39,6 @@ export default async function EstrategistPage() {
           label="Crises Globais"
           value={String(kpis.global_crises)}
           color="orange"
-        />
-        <KPICard
-          icon={<TrendingUp className="h-5 w-5 text-green-600" />}
-          label="Tendência Positiva"
-          value={`${sentimentOverview.positive_percentage}%`}
-          color="green"
         />
         <KPICard
           icon={<Sparkles className="h-5 w-5 text-purple-600" />}
@@ -76,10 +68,7 @@ export default async function EstrategistPage() {
                       <div>
                         <p className="font-semibold text-gray-900">{theme.theme_name}</p>
                         <p className="text-sm text-gray-600">
-                          {theme.mention_count} {theme.mention_count === 1 ? 'menção' : 'menções'} •{' '}
-                          😊 {theme.sentiment_distribution.positive} 😐{' '}
-                          {theme.sentiment_distribution.neutral} 😞{' '}
-                          {theme.sentiment_distribution.negative}
+                          {theme.mention_count} {theme.mention_count === 1 ? 'menção' : 'menções'}
                         </p>
                       </div>
                     </div>
@@ -99,78 +88,60 @@ export default async function EstrategistPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Sentimento Geral</CardTitle>
-            <CardDescription>
-              Proporção de notícias ({sentimentOverview.total_news} analisadas)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <SentimentBar label="😊 Positivo" pct={sentimentOverview.positive_percentage} color="green" />
-              <SentimentBar label="😐 Neutro" pct={sentimentOverview.neutral_percentage} color="gray" />
-              <SentimentBar label="😞 Negativo" pct={sentimentOverview.negative_percentage} color="red" />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Crises Globais</CardTitle>
+          <CardDescription>Temas em crise na mídia</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {globalCrises.length === 0 ? (
+            <div className="bg-green-50 rounded-lg p-8 text-center">
+              <p className="text-green-700 font-medium">✓ Nenhuma crise global detectada</p>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Crises Globais</CardTitle>
-            <CardDescription>Temas em crise na mídia</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {globalCrises.length === 0 ? (
-              <div className="bg-green-50 rounded-lg p-8 text-center">
-                <p className="text-green-700 font-medium">✓ Nenhuma crise global detectada</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {globalCrises.map((crisis, idx) => (
-                  <div
-                    key={idx}
-                    className={`border rounded-lg p-3 ${
-                      crisis.severity === 'critical'
-                        ? 'bg-red-50 border-red-200'
-                        : 'bg-orange-50 border-orange-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Zap
-                        className={`h-4 w-4 ${
-                          crisis.severity === 'critical' ? 'text-red-600' : 'text-orange-600'
-                        }`}
-                      />
-                      <span className="font-semibold text-sm text-gray-900">
-                        {crisis.theme_name}
-                      </span>
-                      <Badge
-                        className={
-                          crisis.severity === 'critical'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-orange-100 text-orange-800'
-                        }
-                      >
-                        {crisis.severity}
-                      </Badge>
-                      <span className="text-xs text-gray-500">
-                        {crisis.client_count} cliente{crisis.client_count !== 1 ? 's' : ''} afetado{crisis.client_count !== 1 ? 's' : ''}
-                      </span>
-                    </div>
+          ) : (
+            <div className="space-y-3">
+              {globalCrises.map((crisis, idx) => (
+                <div
+                  key={idx}
+                  className={`border rounded-lg p-3 ${
+                    crisis.severity === 'critical'
+                      ? 'bg-red-50 border-red-200'
+                      : 'bg-orange-50 border-orange-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Zap
+                      className={`h-4 w-4 ${
+                        crisis.severity === 'critical' ? 'text-red-600' : 'text-orange-600'
+                      }`}
+                    />
+                    <span className="font-semibold text-sm text-gray-900">
+                      {crisis.theme_name}
+                    </span>
+                    <Badge
+                      className={
+                        crisis.severity === 'critical'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-orange-100 text-orange-800'
+                      }
+                    >
+                      {crisis.severity}
+                    </Badge>
+                    <span className="text-xs text-gray-500">
+                      {crisis.client_count} cliente{crisis.client_count !== 1 ? 's' : ''} afetado{crisis.client_count !== 1 ? 's' : ''}
+                    </span>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Oportunidades de Campanha</CardTitle>
-          <CardDescription>Temas com alto potencial de engajamento</CardDescription>
+          <CardDescription>Temas com maior crescimento de volume (7 dias vs. 7 anteriores)</CardDescription>
         </CardHeader>
         <CardContent>
           {recommendations.length === 0 ? (
@@ -185,29 +156,12 @@ export default async function EstrategistPage() {
                     <div className="flex-1">
                       <p className="font-semibold text-gray-900">{rec.theme}</p>
                       <p className="text-sm text-gray-700 mt-1">{rec.reason}</p>
-                      <div className="mt-2 text-xs text-gray-600">
-                        <span
-                          className={`inline-block px-2 py-1 rounded-full ${
-                            rec.sentiment === 'positive'
-                              ? 'bg-green-100 text-green-800'
-                              : rec.sentiment === 'negative'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-gray-100 text-gray-800'
-                          }`}
-                        >
-                          {rec.sentiment === 'positive'
-                            ? '😊 Positivo'
-                            : rec.sentiment === 'negative'
-                              ? '😞 Negativo'
-                              : '😐 Neutro'}
-                        </span>
-                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-blue-600">
-                        {rec.opportunity_score.toFixed(0)}
+                        {rec.opportunity_score}
                       </p>
-                      <p className="text-xs text-gray-600">Score</p>
+                      <p className="text-xs text-gray-600">Menções (7d)</p>
                     </div>
                   </div>
                 </div>
@@ -251,22 +205,5 @@ function KPICard({
         </div>
       </CardContent>
     </Card>
-  )
-}
-
-function SentimentBar({ label, pct, color }: { label: string; pct: number; color: 'green' | 'gray' | 'red' }) {
-  const barColor = color === 'green' ? 'bg-green-500' : color === 'red' ? 'bg-red-500' : 'bg-gray-500'
-  const textColor = color === 'green' ? 'text-green-600' : color === 'red' ? 'text-red-600' : 'text-gray-600'
-
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-sm font-medium text-gray-700">{label}</span>
-        <span className={`text-lg font-bold ${textColor}`}>{pct}%</span>
-      </div>
-      <div className="w-full bg-gray-200 rounded-full h-2">
-        <div className={`${barColor} h-2 rounded-full`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
   )
 }
