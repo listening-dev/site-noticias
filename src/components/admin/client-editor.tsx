@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { AlertCircle, Check, Loader2, Plus, RotateCcw } from 'lucide-react'
+import { AlertCircle, Check, Loader2, Plus, RotateCcw, Sparkles } from 'lucide-react'
 import { FilterEditor, FilterDraft } from './filter-editor'
 
 interface Source {
@@ -55,6 +55,9 @@ export function ClientEditor({
   const [reprocessing, setReprocessing] = useState(false)
   const [reprocessResult, setReprocessResult] = useState<string | null>(null)
   const [reprocessWindow, setReprocessWindow] = useState(30)
+  const [recategorizing, setRecategorizing] = useState(false)
+  const [recatProgress, setRecatProgress] = useState<{ processed: number; remaining: number } | null>(null)
+  const [recatError, setRecatError] = useState<string | null>(null)
 
   const basicsDirty =
     name !== initialName ||
@@ -100,6 +103,33 @@ export function ClientEditor({
       setReprocessResult(`Erro: ${e?.message ?? 'falha no reprocesso'}`)
     } finally {
       setReprocessing(false)
+    }
+  }
+
+  async function recategorize(continueFrom = false) {
+    setRecatError(null)
+    if (!continueFrom) setRecatProgress(null)
+    setRecategorizing(true)
+    let isFirst = !continueFrom
+    let totalProcessed = continueFrom ? (recatProgress?.processed ?? 0) : 0
+    try {
+      while (true) {
+        const res = await fetch(`/api/admin/clientes/${clientId}/recategorizar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reset: isFirst }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'Erro')
+        isFirst = false
+        totalProcessed += data.processed
+        setRecatProgress({ processed: totalProcessed, remaining: data.remaining })
+        if (data.remaining === 0 || data.processed === 0) break
+      }
+    } catch (e: any) {
+      setRecatError(e?.message ?? 'Erro ao recategorizar')
+    } finally {
+      setRecategorizing(false)
     }
   }
 
@@ -292,6 +322,46 @@ export function ClientEditor({
           </Button>
           {reprocessResult && (
             <span className="text-xs text-gray-600 ml-2">{reprocessResult}</span>
+          )}
+        </div>
+      </Card>
+
+      {/* Recategorização por IA */}
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">Recategorizar com IA</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Usa OpenAI para reclassificar as categorias de todas as notícias das fontes vinculadas
+          a este cliente. Processa em lotes de 50.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button variant="outline" onClick={() => recategorize(false)} disabled={recategorizing}>
+            {recategorizing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {recategorizing ? 'Processando...' : 'Recategorizar do zero'}
+          </Button>
+          {recatProgress && recatProgress.remaining > 0 && !recategorizing && (
+            <Button variant="outline" size="sm" onClick={() => recategorize(true)}>
+              Continuar ({recatProgress.remaining} restantes)
+            </Button>
+          )}
+          {recatProgress && recategorizing && (
+            <span className="text-xs text-gray-600">
+              {recatProgress.processed} processadas, {recatProgress.remaining} restantes...
+            </span>
+          )}
+          {recatProgress && recatProgress.remaining === 0 && !recategorizing && (
+            <span className="text-xs text-green-700">
+              Concluído — {recatProgress.processed} notícias recategorizadas.
+            </span>
+          )}
+          {recatError && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-600">{recatError}</span>
+              {recatProgress && recatProgress.remaining > 0 && (
+                <Button variant="outline" size="sm" onClick={() => recategorize(true)}>
+                  Tentar continuar
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </Card>

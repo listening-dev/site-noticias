@@ -52,7 +52,7 @@ export class TokenBudgetManager {
   private apiHealth: APIHealth = { avgResponseTimeMs: 0, errorRate: 0, lastChecked: Date.now() }
 
   private constructor(config: TokenBudgetConfig = {}) {
-    this.dailyLimit = config.dailyLimit || 100000
+    this.dailyLimit = config.dailyLimit || parseInt(process.env.OPENAI_DAILY_TOKEN_LIMIT || '100000', 10)
     this.minHeadroom = config.minHeadroom || 1000
     this.enabled = config.enabled !== false
 

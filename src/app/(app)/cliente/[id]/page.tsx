@@ -9,7 +9,24 @@ import { Source } from '@/lib/types/database'
 
 interface PageProps {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ page?: string; from?: string; to?: string; source?: string; category?: string }>
+  searchParams: Promise<{
+    page?: string
+    from?: string
+    to?: string
+    source?: string
+    category?: string
+    q?: string
+    keyword?: string
+  }>
+}
+
+function normalizeSourceCategory(cat: string | null): string | null {
+  if (!cat || cat === 'tecnologia') return null
+  return cat.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+function normalizeSearchQuery(q: string): string {
+  return q.trim().normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
 export default async function ClientePage({ params, searchParams }: PageProps) {
@@ -50,13 +67,22 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
       .eq('client_id', id),
   ])
 
-  const linkedSources: Source[] = (clientSources ?? []).map((cs: any) => cs.sources).filter(Boolean)
+  // Apenas fontes ativas aparecem no filtro de portal
+  const allLinkedSources: Source[] = (clientSources ?? []).map((cs: any) => cs.sources).filter(Boolean)
+  const linkedSources: Source[] = allLinkedSources.filter((s: any) => s.active !== false)
   const hasLinkedSources = linkedSources.length > 0
   const hasActiveFilters = !!filters && filters.length > 0
 
+  // Categorias derivadas das fontes ativas, normalizadas para corresponder a news.category
   const linkedCategories = hasLinkedSources
-    ? ([...new Set(linkedSources.map((s) => s.category).filter(Boolean))] as string[])
+    ? ([...new Set(
+        linkedSources
+          .map((s) => normalizeSourceCategory(s.category))
+          .filter(Boolean)
+      )] as string[])
     : []
+
+  const keywordChips: string[] = (client as any).keyword_chips ?? []
 
   // Fonte única de verdade: client_news.
   // Modo Y estrito (com filtros) ou modo fonte aberta (sem filtros + com fontes).
@@ -79,6 +105,8 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
 
     if (sp.source) query = query.eq('news.source_id', sp.source)
     if (sp.category) query = query.eq('news.category', sp.category)
+    if (sp.q) query = query.textSearch('news.search_vector', normalizeSearchQuery(sp.q), { type: 'websearch', config: 'portuguese' })
+    if (sp.keyword) query = query.textSearch('news.search_vector', normalizeSearchQuery(sp.keyword), { type: 'websearch', config: 'portuguese' })
 
     const { data, count } = await query.range(rangeFrom, rangeTo)
 
@@ -115,6 +143,8 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
     qp.set('to', to.toISOString())
     if (sp.source) qp.set('source', sp.source)
     if (sp.category) qp.set('category', sp.category)
+    if (sp.q) qp.set('q', sp.q)
+    if (sp.keyword) qp.set('keyword', sp.keyword)
     if (p > 1) qp.set('page', String(p))
     return `?${qp.toString()}`
   }
@@ -167,7 +197,13 @@ export default async function ClientePage({ params, searchParams }: PageProps) {
       </div>
 
       {hasLinkedSources && (
-        <NewsFilters sources={linkedSources} categories={linkedCategories} />
+        <NewsFilters
+          sources={linkedSources}
+          categories={linkedCategories}
+          keywordChips={keywordChips}
+          activeKeyword={sp.keyword ?? ''}
+          activeQ={sp.q ?? ''}
+        />
       )}
 
       {newsItems.length > 0 ? (

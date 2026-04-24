@@ -18,6 +18,7 @@ export type SystemCategory =
   | 'infraestrutura'
   | 'internacional'
   | 'regional'
+  | 'inteligencia_artificial'
   | 'geral'
 
 export interface ResolutionMetrics {
@@ -114,6 +115,18 @@ export class CategoryResolver {
     global: 'internacional',
     diplomacia: 'internacional',
 
+    'inteligência artificial': 'inteligencia_artificial',
+    'inteligencia artificial': 'inteligencia_artificial',
+    inteligencia_artificial: 'inteligencia_artificial',
+    'artificial intelligence': 'inteligencia_artificial',
+    'machine learning': 'inteligencia_artificial',
+    'deep learning': 'inteligencia_artificial',
+    llm: 'inteligencia_artificial',
+    chatgpt: 'inteligencia_artificial',
+    openai: 'inteligencia_artificial',
+    'generative ai': 'inteligencia_artificial',
+    'ia generativa': 'inteligencia_artificial',
+
     regional: 'regional',
     estado: 'regional',
     município: 'regional',
@@ -190,7 +203,7 @@ export class CategoryResolver {
       console.warn(`[CategoryResolver] Item categories didn't match any pattern: ${itemCategories.join(', ')}`)
     }
 
-    // Strategy 3: Source category (skip if "tecnologia")
+    // Strategy 3: Source category (skip if "tecnologia" — falls to geral)
     if (sourceCategory && sourceCategory !== 'tecnologia') {
       const sourceLower = sourceCategory.toLowerCase().trim()
       if (this.categoryMap[sourceLower]) {

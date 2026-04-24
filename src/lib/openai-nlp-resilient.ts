@@ -90,7 +90,19 @@ export async function extractTopicsWithResilient(
 
 1. Tópicos principais (máx 5, com confidence 0-1)
 2. Entidades mencionadas (pessoas, organizações, locais)
-3. Categoria (economia, política, tecnologia, saúde, esportes, outros)
+3. Categoria — escolha EXATAMENTE uma das opções abaixo:
+   - politica: governo, eleições, partidos, congresso, ministérios, política pública
+   - economia: finanças, mercado, negócios, PIB, inflação, bancos, investimentos
+   - saude: medicina, hospitais, doenças, planos de saúde, farmácias, saúde pública
+   - educacao: escolas, universidades, ensino, professores, MEC
+   - seguranca: polícia, crime, violência, justiça, presídios, segurança pública
+   - agricultura: agronegócio, safra, pecuária, rural, MAPA
+   - energia: petróleo, gás, eletricidade, usinas, renováveis, Petrobras
+   - infraestrutura: transporte, rodovias, aeroportos, portos, obras, saneamento
+   - internacional: notícias do exterior, relações internacionais, geopolítica
+   - regional: notícias estaduais ou municipais, governadores, prefeitos
+   - inteligencia_artificial: IA, machine learning, LLM, ChatGPT, modelos de linguagem, automação inteligente
+   - geral: não se encaixa claramente em nenhuma das anteriores
 
 Notícia:
 ${content}
@@ -240,6 +252,62 @@ Responda em JSON (sem markdown) com exatamente esta estrutura:
       members: [t.name],
       confidence: t.confidence,
     }))
+  }
+}
+
+export interface BatchCategoryResult {
+  id: string
+  category: string
+}
+
+/**
+ * Classifica categorias de múltiplos artigos em uma única chamada OpenAI.
+ * Muito mais rápido que uma chamada por artigo para operações em bulk.
+ */
+export async function classifyCategoriesBatch(
+  articles: Array<{ id: string; title: string; description: string | null }>
+): Promise<BatchCategoryResult[]> {
+  if (articles.length === 0) return []
+
+  const numbered = articles
+    .map((a, i) => `[${i + 1}] Título: ${a.title}\nResumo: ${(a.description ?? '').slice(0, 300)}`)
+    .join('\n\n')
+
+  const prompt = `Classifique cada notícia abaixo em exatamente uma categoria.
+
+Categorias permitidas (retorne o valor exato):
+politica, economia, saude, educacao, seguranca, agricultura, energia, infraestrutura, internacional, regional, inteligencia_artificial, geral
+
+${numbered}
+
+Responda em JSON sem markdown:
+{"results": [{"idx": 1, "category": "..."}, {"idx": 2, "category": "..."}, ...]}`
+
+  try {
+    const resilient = getResilientClient()
+    const response = await resilient.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: articles.length * 20 + 50,
+    })
+
+    const content = response.choices[0]?.message?.content ?? ''
+    const jsonStr = content.replace(/^```json?\n/, '').replace(/\n```$/, '').trim()
+    const parsed = JSON.parse(jsonStr)
+
+    const validCategories = new Set([
+      'politica','economia','saude','educacao','seguranca','agricultura',
+      'energia','infraestrutura','internacional','regional','inteligencia_artificial','geral',
+    ])
+
+    return (parsed.results ?? []).map((r: any) => ({
+      id: articles[r.idx - 1]?.id ?? '',
+      category: validCategories.has(r.category) ? r.category : 'geral',
+    })).filter((r: BatchCategoryResult) => r.id)
+  } catch (error) {
+    console.error('[OpenAI-Resilient] Erro ao classificar batch de categorias:', error)
+    return articles.map((a) => ({ id: a.id, category: 'geral' }))
   }
 }
 

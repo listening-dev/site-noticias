@@ -2,6 +2,19 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { extractTopicsFromNews, clusterThemes } from './openai-nlp'
 import { TokenBudgetManager } from '@/lib/token-budget-manager'
 import { Database } from '@/lib/types/database'
+import { SystemCategory } from './category-resolver'
+
+const VALID_SYSTEM_CATEGORIES = new Set<string>([
+  'politica', 'economia', 'saude', 'educacao', 'seguranca',
+  'agricultura', 'energia', 'infraestrutura', 'internacional',
+  'regional', 'inteligencia_artificial', 'geral',
+])
+
+function toSystemCategory(raw: string): SystemCategory {
+  const normalized = raw.toLowerCase().trim().replace(/[àáâãä]/g, 'a').replace(/[éê]/g, 'e').replace(/[íî]/g, 'i').replace(/[óôõö]/g, 'o').replace(/[úû]/g, 'u').replace(/ç/g, 'c')
+  if (VALID_SYSTEM_CATEGORIES.has(normalized)) return normalized as SystemCategory
+  return 'geral'
+}
 
 type AppSupabaseClient = SupabaseClient<Database>
 
@@ -23,6 +36,7 @@ export async function processNewsTopic(
   try {
     // 1. Extrair tópicos do OpenAI
     const extracted = await extractTopicsFromNews(title, description)
+    const aiCategory = toSystemCategory(extracted.category)
 
     // 2. Salvar em news_topics
     const { error } = await supabase
@@ -33,7 +47,7 @@ export async function processNewsTopic(
           news_id: newsId,
           topics: extracted.topics,
           entities: extracted.entities,
-          category: extracted.category,
+          category: aiCategory,
         },
         { onConflict: 'news_id' }
       )
@@ -41,6 +55,13 @@ export async function processNewsTopic(
     if (error) {
       throw new Error(`Erro ao salvar tópicos: ${error.message}`)
     }
+
+    // 3. Atualizar news.category com a categoria determinada pelo OpenAI
+    await supabase
+      .schema('noticias')
+      .from('news')
+      .update({ category: aiCategory })
+      .eq('id', newsId)
 
     return { news_id: newsId, success: true }
   } catch (err) {
