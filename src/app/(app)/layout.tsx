@@ -19,20 +19,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .eq('id', user.id)
     .single()
 
-  // Buscar clientes do usuário
-  const { data: userClients } = await supabase
-    .schema('noticias')
-    .from('user_clients')
-    .select('client_id, clients(*)')
-    .eq('user_id', user.id)
-
-  const clients = userClients?.map((uc: any) => uc.clients).filter(Boolean) ?? []
-
-  // Se admin, buscar todos os clientes
-  let allClients = clients
+  // Se admin, buscar todos os clientes; senão buscar apenas os vinculados ao usuário
+  let allClients: any[] = []
   if (profile?.role === 'admin') {
     const { data: all } = await supabase.schema('noticias').from('clients').select('*').order('name')
     allClients = all ?? []
+  } else {
+    const { data: ucRows } = await supabase
+      .schema('noticias')
+      .from('user_clients')
+      .select('client_id')
+      .eq('user_id', user.id)
+    const clientIds = (ucRows ?? []).map((r: any) => r.client_id)
+    if (clientIds.length > 0) {
+      const { data } = await supabase
+        .schema('noticias')
+        .from('clients')
+        .select('*')
+        .in('id', clientIds)
+        .order('name')
+      allClients = data ?? []
+    }
   }
 
   return (

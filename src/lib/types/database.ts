@@ -111,6 +111,7 @@ export interface Client {
   name: string
   description: string | null
   created_at: string
+  keyword_chips: string[]
 }
 
 export interface ClientFilter {
